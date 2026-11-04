@@ -930,7 +930,9 @@ static void buttonHandler_seqButtonPressed(uint8_t seqButtonPressed)
 			break;
 
 		case SEQ_CONFIG: //config
-			buttonHandler_stateMemory.selectButtonMode = SEQ_CONFIG;
+			//(was SEQ_CONFIG, a step button number equal to SELECT_MODE_LAST_STEP_ALL:
+			//the next step press set the length of all tracks)
+			buttonHandler_stateMemory.selectButtonMode = SELECT_MODE_MENU;
 			led_clearAllBlinkLeds();
 			led_setBlinkLed(LED_STEP12,1);
 			menu_switchPage(MENU_MIDI_PAGE);
