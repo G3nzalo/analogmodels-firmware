@@ -306,6 +306,8 @@ void seq_clearStepLocks(uint8_t trackNr, uint8_t pattern, uint8_t step);
 // parameter locks of a step, lock 1 and 2 and the extra ones (custom firmware)
 /** the extra lock pool of a pattern */
 LockPool* seq_getLockPool(uint8_t pattern);
+/** replaces the extra locks of a pattern with a copy of src (and checks them) */
+void seq_setLockPool(uint8_t pattern, const LockPool* src);
 /** all locks of a step, lock 1 and 2 first: fills nr[] and val[] (room for
  *  NUM_STEP_LOCKS each) and returns how many there are */
 uint8_t seq_getStepLocks(uint8_t pattern, uint8_t track, uint8_t step, uint8_t* nr, uint8_t* val);

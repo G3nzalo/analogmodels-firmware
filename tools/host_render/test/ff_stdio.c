@@ -131,6 +131,17 @@ FRESULT f_unlink(const TCHAR* path)
 	return (!unlink(p) || !rmdir(p)) ? FR_OK : FR_NO_FILE;
 }
 
+FRESULT f_rename(const TCHAR* path_old, const TCHAR* path_new)
+{
+	char a[512], b[512];
+	struct stat st;
+	ffhost_path(a, sizeof a, path_old);
+	ffhost_path(b, sizeof b, path_new);
+	if (stat(a, &st)) return FR_NO_FILE;
+	if (!stat(b, &st)) return FR_EXIST;	/* like FatFs: no replacing */
+	return rename(a, b) ? FR_DENIED : FR_OK;
+}
+
 FRESULT f_stat(const TCHAR* path, FILINFO* fno)
 {
 	char p[512];

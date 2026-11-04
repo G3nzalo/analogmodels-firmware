@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include "menu/CcNr2Text.h"
 #include "menu/menu.h"
+#include <strings.h>
 //#include <util/delay.h>
 #include "lcd.h"
 //#include <avr/pgmspace.h>
@@ -48,6 +49,12 @@ static uint8_t morph_index = 0;
 char savefileNames[NUM_KIT_SLOTS][NUM_SAVEFILE_NAMES][8];
 
 char currentFolder[13];
+
+//project save: folder suffixes (8.3 names: /projNNn, /projNNo)
+#define PROJ_NEW_SUFFIX "n"
+#define PROJ_OLD_SUFFIX "o"
+//set while a project is written into its new (empty) folder: no old files to remove
+static uint8_t preset_writingNewFolder = 0;
 
 //char presetNameBuffer[8];
 //char currentName[8];
@@ -75,6 +82,8 @@ static void preset_makeFileNameOld(char *buf, uint8_t num, uint8_t type);
 
 //load uses wildcard to find a name of the pattern 00-*.ext
 static FRESULT preset_makeFileNameLoad(char *buf, uint8_t num, uint8_t type);
+static FRESULT preset_removeOtherFiles(uint8_t num, uint8_t type, const char *keep);
+static uint8_t preset_readPatternData(uint8_t patternNr, uint8_t dataVersion);
 //save uses the kit name to create a filename eg 00-NAME.ext
 static void preset_makeFileNameSave(char *buf, uint8_t num, uint8_t type, char *name);
 
@@ -88,6 +97,59 @@ uint32_t preset_patTimer = 0;
 
 uint8_t preset_kitDirty = 0;
 uint8_t preset_patDirty = 0;
+
+//one pattern as stored in a pattern file (and tmp.pat), read completely before it is used
+typedef struct PatternFileDataStruct
+{
+	Step steps[NUM_TRACKS][NUM_STEPS];
+	StepTiming timing[NUM_TRACKS][NUM_STEPS];
+	uint16_t mainSteps[NUM_BARS][NUM_TRACKS];
+	uint8_t length[NUM_TRACKS];
+	uint8_t shuffle;
+	uint8_t kitNr;
+}PatternFileData;
+static PatternFileData preset_patternBuffer;
+
+//values read from files are used as indices: keep them in range
+//track length: 0 is read as 16 by the sequencer, more than NUM_STEPS steps don't exist
+static uint8_t preset_validLength(const uint8_t length)
+{
+	return length > NUM_STEPS ? NUM_STEPS : length;
+}
+static void preset_validateKitNr(uint8_t patternNr)
+{
+	if(seq_patternSet.kitNr[patternNr] >= NUM_KIT_SLOTS)
+		seq_patternSet.kitNr[patternNr] = 0;
+}
+
+//Writing a file: the first error of all writes, and a short write (card full)
+//counts as one; preset_fcloseWrite() closes the file and returns that error, or
+//the result of closing it (which writes the last data). So every save closes its
+//file (FatFs allows one open file at a time: a file left open blocked the card
+//until a reboot) and reports a failed or incomplete write.
+static FRESULT preset_writeResult = FR_OK;
+
+static FRESULT preset_fopenWrite(const char* path)
+{
+	preset_writeResult = f_open((FIL*)&SDFile, path, FA_CREATE_ALWAYS | FA_WRITE);
+	return preset_writeResult;
+}
+
+static FRESULT preset_fwrite(FIL* fp, const void* buf, UINT btw, UINT* bw)
+{
+	if(preset_writeResult != FR_OK)
+		return preset_writeResult;
+	preset_writeResult = f_write(fp, buf, btw, bw);
+	if(preset_writeResult == FR_OK && *bw != btw)
+		preset_writeResult = FR_DENIED;	//card full
+	return preset_writeResult;
+}
+
+static FRESULT preset_fcloseWrite(void)
+{
+	const FRESULT res = f_close((FIL*)&SDFile);
+	return preset_writeResult != FR_OK ? preset_writeResult : res;
+}
 
 void preset_initTmpFolder()
 {
@@ -208,7 +270,7 @@ FRESULT preset_saveTmpKit()
 	unsigned int bytesWritten;
 
 	//open the file
-	res = f_open((FIL*)&SDFile,"tmp.snd",FA_CREATE_ALWAYS | FA_WRITE);
+	res = preset_fopenWrite("tmp.snd");
 	if(res != FR_OK)
 	{
 #if USE_INTERRUPT_ONLY_DURING_SAVE_PROJ
@@ -220,7 +282,7 @@ FRESULT preset_saveTmpKit()
 	}
 
 	//write current preset nr to file
-	res = f_write((FIL*)&SDFile,(void*)&menu_selectedPresetNr[SAVE_TYPE_KIT],1,&bytesWritten);
+	res = preset_fwrite((FIL*)&SDFile,(void*)&menu_loadedPresetNr[CURRENT_KIT],1,&bytesWritten);
 	if(res != FR_OK)
 	{
 		f_close((FIL*)&SDFile);
@@ -232,16 +294,16 @@ FRESULT preset_saveTmpKit()
 		return res;
 	}
 	//write the preset data
-	f_write((FIL*)&SDFile,activeParameters,END_OF_SOUND_PARAMETERS,&bytesWritten);
+	preset_fwrite((FIL*)&SDFile,activeParameters,END_OF_SOUND_PARAMETERS,&bytesWritten);
 
 	//close the file
-	f_close((FIL*)&SDFile);
+	res = preset_fcloseWrite();
 #if USE_INTERRUPT_ONLY_DURING_SAVE_PROJ
 			HAL_TIM_Base_Stop_IT(&htim2);	//calc sample interrupt - prio 1
 #else
 
 #endif
-	return FR_OK;
+	return res;
 }
 
 FRESULT preset_LoadTmpKit()
@@ -261,7 +323,10 @@ FRESULT preset_LoadTmpKit()
 		goto closeFile;
 	}
 
+	if(kitNr >= NUM_KIT_SLOTS)
+		kitNr = 0;
 	menu_selectedPresetNr[SAVE_TYPE_KIT] = kitNr;
+	menu_loadedPresetNr[CURRENT_KIT] = kitNr;
 
 
 	//read the file content
@@ -317,16 +382,20 @@ static void preset_writeLockPool(uint8_t patternNr)
 	const LockPool* pool = seq_getLockPool(patternNr);
 	uint8_t count = pool->count;
 	if(count > LOCK_POOL_SIZE) count = LOCK_POOL_SIZE;
-	f_write((FIL*)&SDFile, preset_lockPoolTag, sizeof(preset_lockPoolTag), &bytesWritten);
-	f_write((FIL*)&SDFile, &count, 1, &bytesWritten);
+	preset_fwrite((FIL*)&SDFile, preset_lockPoolTag, sizeof(preset_lockPoolTag), &bytesWritten);
+	preset_fwrite((FIL*)&SDFile, &count, 1, &bytesWritten);
 	if(count)
-		f_write((FIL*)&SDFile, pool->lock, count * sizeof(ExtraLock), &bytesWritten);
+		preset_fwrite((FIL*)&SDFile, pool->lock, count * sizeof(ExtraLock), &bytesWritten);
 }
 
-static void preset_readLockPool(uint8_t patternNr)
+// the extra locks of a pattern file go into a buffer first (see preset_readPatternData)
+static LockPool preset_lockPoolBuffer;
+
+// reads the extra locks behind the pattern data into pool; none if the file has no
+// (or a damaged) lock block
+static void preset_readLockPool(LockPool* pool)
 {
 	UINT bytesRead = 0;
-	LockPool* pool = seq_getLockPool(patternNr);
 	char tag[sizeof(preset_lockPoolTag)];
 	uint8_t count = 0;
 	pool->count = 0;
@@ -339,7 +408,6 @@ static void preset_readLockPool(uint8_t patternNr)
 	if(f_read((FIL*)&SDFile, pool->lock, count * sizeof(ExtraLock), &bytesRead) != FR_OK)
 		return;
 	pool->count = (uint8_t)(bytesRead / sizeof(ExtraLock));
-	seq_checkLockPool(patternNr);
 }
 
 FRESULT preset_LoadTmpPat()
@@ -393,132 +461,8 @@ FRESULT preset_LoadTmpPat()
 
 		seq_copyPatternToBackupBuffer(seq_activePattern);
 		//frontParser_shownPattern = menu_playedPattern;
-		uint8_t patternNr = menu_playedPattern;
-
-	//---------------- read pattern data -----------------------------
-
-		// note that the pattern length data is no longer stored in the same way.
-		// This means that loading old patterns with non-standard length, the length will be
-		// ignored and a standard length used. I think it's acceptable as long as users are aware of this.
-
-		uint8_t next=0;
-
-		// ---------- Load step data first
-
-		// load step data
-
-
-
-		for(uint8_t trk=0; trk<NUM_TRACKS;trk++)
-		{
-
-			f_read((FIL*)&SDFile,(void*)&seq_patternSet.seq_subStepPattern[patternNr][trk][0],sizeof(Step)*STEPS_PER_PATTERN,&bytesRead);
-
-			if(bytesRead!=sizeof(Step)*(STEPS_PER_PATTERN))
-			{
-				success=0;
-				break; // file error, or we ran out of file (eof)
-			}
-
-			//Pattern V3 and up => flam added
-			//if(dataVersion > 2)
-			{
-				f_read((FIL*)&SDFile,(void*)&seq_patternSet.seq_stepTiming[patternNr][trk][0],sizeof(uint8_t)*STEPS_PER_PATTERN,&bytesRead);
-
-				if(bytesRead!=sizeof(uint8_t)*(STEPS_PER_PATTERN))
-				{
-					success=0;
-					break; // file error, or we ran out of file (eof)
-				}
-			}
-
-		}
-
-
-
-		// ---------- load the main step data next
-		uint16_t mainStepData;
-
-
-			for(uint8_t trk=0; trk<NUM_TRACKS;trk++)
-			{
-				for(uint8_t bar=0;bar<NUM_BARS; bar++)
-				{
-					f_read((FIL*)&SDFile,(void*)&mainStepData,sizeof(uint16_t),&bytesRead);
-
-					if( bytesRead==sizeof(uint16_t)) {
-						seq_patternSet.seq_mainSteps[bar][patternNr][trk] = mainStepData;
-					}
-					 else {
-							success=0;
-							break;
-						}
-				}
-			}
-
-
-
-		// ------------ shuffle settings
-		if(success) {
-			//load the shuffle settings
-			f_read((FIL*)&SDFile,(void*)&seq_patternSet.shuffle[patternNr],sizeof(uint8_t),&bytesRead);
-			//and update on cortex
-			if(bytesRead)
-			{
-
-				//activeParameters[PAR_SHUFFLE] = seq_patternSet.shuffle[patternNr];
-				//frontPanel_sendData(SEQ_CC,SEQ_SHUFFLE,parameter_values[PAR_SHUFFLE]);
-
-				//seq_setShuffle(activeParameters[PAR_SHUFFLE]/127.f);
-			}
-			else {
-				success=0;
-			}
-		}
-
-		// ----------- Pattern/track lengths
-		// -- AS this might not exist in the saved data file, we still want success
-		if(success) {
-
-				for(uint8_t trk=0; trk<NUM_TRACKS;trk++)
-				{
-					f_read((FIL*)&SDFile,(void*)&next,sizeof(uint8_t),&bytesRead);
-					seq_patternSet.length[patternNr][trk] = next;
-				}
-
-			success=1; // just to document that we don't consider this a failure, we just didn't read the bytes for this
-		}
-
-		//if(dataVersion > 1)
-		{
-			f_read((FIL*)&SDFile,(void*)&seq_patternSet.kitNr[patternNr],sizeof(uint8_t),&bytesRead);
-			if(bytesRead == 0) success = 0;
-
-		}
-
-		//the extra parameter locks (custom firmware)
-		if(success)
-			preset_readLockPool(patternNr);
-		else
-			seq_getLockPool(patternNr)->count = 0;
-
-		if( success == 0)
-		{
-
-
-			f_close((FIL*)&SDFile);
-#if USE_INTERRUPT_ONLY_DURING_SAVE_PROJ
-			HAL_TIM_Base_Stop_IT(&htim2);	//calc sample interrupt - prio 1
-#else
-
-#endif
-			return FR_INT_ERR;
-		}
-
-		success=1;
-		//close the file handle
-
-
+		//same layout as a V3 pattern file (without name and version tag)
+		success = preset_readPatternData(menu_playedPattern, 3);
 
 	closeFile:
 		f_close((FIL*)&SDFile);
@@ -556,7 +500,7 @@ FRESULT preset_saveTmpPat()
 	//lcd_string(PSTR("Saving pattern"));
 
 	//open the file
-	res = f_open((FIL*)&SDFile,"tmp.pat",FA_CREATE_ALWAYS | FA_WRITE);
+	res = preset_fopenWrite("tmp.pat");
 	if(res != FR_OK)
 	{
 #if USE_INTERRUPT_ONLY_DURING_SAVE_PROJ
@@ -568,7 +512,7 @@ FRESULT preset_saveTmpPat()
 	}
 
 	//write current preset nr to file
-	res = f_write((FIL*)&SDFile,(void*)&menu_playedPattern,1,&bytesWritten);
+	res = preset_fwrite((FIL*)&SDFile,(void*)&menu_playedPattern,1,&bytesWritten);
 	if(res != FR_OK)
 	{
 		f_close((FIL*)&SDFile);
@@ -590,9 +534,9 @@ FRESULT preset_saveTmpPat()
 		//---------------  write the step data (note, vol, prob, autom.) ---------------
 		for(uint8_t trk=0; trk<NUM_TRACKS;trk++)
 		{
-			f_write((FIL*)&SDFile,(const void*)&seq_patternSet.seq_subStepPattern[presetNr][trk][0],sizeof(Step)*STEPS_PER_PATTERN,&bytesWritten);
+			preset_fwrite((FIL*)&SDFile,(const void*)&seq_patternSet.seq_subStepPattern[presetNr][trk][0],sizeof(Step)*STEPS_PER_PATTERN,&bytesWritten);
 
-			f_write((FIL*)&SDFile,(const void*)&seq_patternSet.seq_stepTiming[presetNr][trk][0],sizeof(uint8_t)*STEPS_PER_PATTERN,&bytesWritten);
+			preset_fwrite((FIL*)&SDFile,(const void*)&seq_patternSet.seq_stepTiming[presetNr][trk][0],sizeof(uint8_t)*STEPS_PER_PATTERN,&bytesWritten);
 		}
 
 		//--------------- now the main step data ---------------
@@ -601,15 +545,15 @@ FRESULT preset_saveTmpPat()
 			for(uint8_t bar=0;bar<NUM_BARS; bar++)
 			{
 				const uint16_t mainStepData = seq_patternSet.seq_mainSteps[bar][presetNr][trk];
-				f_write((FIL*)&SDFile,(const void*)&mainStepData,sizeof(uint16_t),&bytesWritten);
+				preset_fwrite((FIL*)&SDFile,(const void*)&mainStepData,sizeof(uint16_t),&bytesWritten);
 			}
 		}
 
 		//----- shuffle setting ------
 
 
-		//f_write((FIL*)&SDFile,(const void*)&activeParameters[PAR_SHUFFLE],sizeof(uint8_t),&bytesWritten);
-		f_write((FIL*)&SDFile,(const void*)&seq_patternSet.shuffle[presetNr],sizeof(uint8_t),&bytesWritten);
+		//preset_fwrite((FIL*)&SDFile,(const void*)&activeParameters[PAR_SHUFFLE],sizeof(uint8_t),&bytesWritten);
+		preset_fwrite((FIL*)&SDFile,(const void*)&seq_patternSet.shuffle[presetNr],sizeof(uint8_t),&bytesWritten);
 
 		//----- pattern/track lengths ------
 		// we reuse the same call from above (when saving main step data)
@@ -620,11 +564,11 @@ FRESULT preset_saveTmpPat()
 		for(uint8_t trk=0; trk<NUM_TRACKS;trk++)
 		{
 				length = seq_patternSet.length[presetNr][trk] ;//seq_patternSet.seq_mainSteps[bar][pat][trk];
-				f_write((FIL*)&SDFile,(const void*)&length,sizeof(uint8_t),&bytesWritten);
+				preset_fwrite((FIL*)&SDFile,(const void*)&length,sizeof(uint8_t),&bytesWritten);
 		}
 
 		//write associated kit nr
-		f_write((FIL*)&SDFile,&seq_patternSet.kitNr[presetNr],sizeof(uint8_t),&bytesWritten);
+		preset_fwrite((FIL*)&SDFile,&seq_patternSet.kitNr[presetNr],sizeof(uint8_t),&bytesWritten);
 
 		//the extra parameter locks (custom firmware)
 		preset_writeLockPool(presetNr);
@@ -632,7 +576,7 @@ FRESULT preset_saveTmpPat()
 #endif
 
 	//close the file
-	f_close((FIL*)&SDFile);
+	res = preset_fcloseWrite();
 
 	//reset the lcd
 //	menu_repaintAll();
@@ -785,6 +729,41 @@ FRESULT empty_directory (
     return fr;
 }
 //----------------------------------
+//removes a folder with its content; a missing folder is no error
+static FRESULT preset_removeFolder(const char* folder)
+{
+	char path[EMPTY_DIR_PATH_LEN];
+	FILINFO fno;
+	FRESULT res = f_stat(folder, &fno);
+	if(res == FR_NO_FILE)
+		return FR_OK;
+	if(res != FR_OK)
+		return res;
+	strcpy(path, folder);
+	res = empty_directory(path);
+	if(res != FR_OK)
+		return res;
+	return f_unlink(folder);
+}
+//----------------------------------
+//a project save writes into /projNN + PROJ_NEW_SUFFIX, then renames /projNN to /projNN + PROJ_OLD_SUFFIX,
+//the new folder to /projNN and removes the old one. If the unit was switched off between the
+//renames, /projNN is missing: the new folder is complete at that point, so finish the save.
+//(The old folder is only taken back if the new one is gone.)
+static void preset_projectFolderName(char* folder, uint8_t projectNr)
+{
+	char other[12];
+	FILINFO fno;
+	sprintf(folder, "/proj%02d", projectNr);
+	if(f_stat(folder, &fno) != FR_NO_FILE)
+		return;
+	sprintf(other, "/proj%02d" PROJ_NEW_SUFFIX, projectNr);
+	if(f_rename(other, folder) == FR_OK)
+		return;
+	sprintf(other, "/proj%02d" PROJ_OLD_SUFFIX, projectNr);
+	f_rename(other, folder);
+}
+//----------------------------------
 
 uint8_t preset_isNameEmpty(char* name)
 {
@@ -828,9 +807,10 @@ void preset_init(uint8_t presetNr)
 
 	para=mainParameters[presetNr];
 
-	for(int i=8;i<END_OF_SOUND_PARAMETERS; i++)
+	//initKit = 8 name bytes + parameters; parameters missing in it are 0
+	for(i=0;i<END_OF_SOUND_PARAMETERS; i++)
 	{
-		para[i-8] = initKit[i];
+		para[i] = i < INIT_KIT_SIZE - 8 ? initKit[8 + i] : 0;
 	}
 
 	//special case mod targets. normalize.
@@ -877,12 +857,12 @@ static void preset_writeDrumsetData(uint8_t presetNr, uint8_t isMorph)
 			{
 				value = preset_getMorphValue(i,activeParameters[PAR_MORPH]);
 			}					
-			f_write((FIL*)&SDFile,&value,1,&bytesWritten);
+			preset_fwrite((FIL*)&SDFile,&value,1,&bytesWritten);
 		}
 	} else {
 		for(i=0;i<END_OF_SOUND_PARAMETERS;i++)
 		{
-			f_write((FIL*)&SDFile,&mainParameters[presetNr][i],1,&bytesWritten);
+			preset_fwrite((FIL*)&SDFile,&mainParameters[presetNr][i],1,&bytesWritten);
 		}
 	}
 }
@@ -941,7 +921,7 @@ void preset_saveDrumsetRam(uint8_t presetNr, uint8_t isMorph)
 			{
 				value = preset_getMorphValue(i,activeParameters[PAR_MORPH]);
 			}
-			//f_write((FIL*)&SDFile,&value,1,&bytesWritten);
+			//preset_fwrite((FIL*)&SDFile,&value,1,&bytesWritten);
 			mainParameters[presetNr][i] = value;
 		}
 	}
@@ -965,20 +945,21 @@ FRESULT preset_saveDrumsetSD(uint8_t presetNr, uint8_t isMorph)
 
 
 	//open the file
-	res = f_open((FIL*)&SDFile,filename,FA_CREATE_ALWAYS | FA_WRITE);
+	res = preset_fopenWrite(filename);
 	if(res != FR_OK) return res;
 	
 	//write preset name to file
 
-	res = f_write((FIL*)&SDFile,(void*)savefileNames[presetNr][KIT_NAMES],8,&bytesWritten);
-	if(res != FR_OK) return res;
+	res = preset_fwrite((FIL*)&SDFile,(void*)savefileNames[presetNr][KIT_NAMES],8,&bytesWritten);
 	//write the preset data
 	preset_writeDrumsetData(presetNr, isMorph);
 	
 	//close the file
-	f_close((FIL*)&SDFile);
+	res = preset_fcloseWrite();
+	if(res == FR_OK)
+		res = preset_removeOtherFiles(presetNr, FEXT_SOUND, filename);
 
-	return FR_OK;
+	return res;
 #else
 #endif
 };
@@ -990,7 +971,7 @@ static void preset_writeGlobalData()
 	int i;
 	for(i=PAR_BEGINNING_OF_GLOBALS;(i<NUM_PARAMS);i++)
 	{
-		f_write((FIL*)&SDFile,&activeParameters[i],1,&bytesWritten);
+		preset_fwrite((FIL*)&SDFile,&activeParameters[i],1,&bytesWritten);
 	}
 }
 
@@ -1007,15 +988,15 @@ FRESULT preset_saveGlobals()
 	}
 	*/
 	//open the file
-	res = f_open((FIL*)&SDFile,"glo.cfg",FA_CREATE_ALWAYS | FA_WRITE);
+	res = preset_fopenWrite("glo.cfg");
 	if(res != FR_OK) return res;
 	preset_writeGlobalData();
 
 	//close the file
-	f_close((FIL*)&SDFile);
+	res = preset_fcloseWrite();
 
 	//f_unmount((TCHAR const*)SDPath);
-	return FR_OK;
+	return res;
 #else
 #endif	
 }
@@ -1038,9 +1019,11 @@ static uint8_t preset_readGlobalData()
 	return 1;
 #else
 	const uint8_t numGlobals = NUM_PARAMS - PAR_BEGINNING_OF_GLOBALS;
-	f_read((FIL*)&SDFile,&activeParameters[PAR_BEGINNING_OF_GLOBALS],numGlobals,&bytesRead);
-	if(bytesRead != numGlobals)	return 0;
-	else return 1;
+	//read into a buffer first, so a damaged file doesn't leave half of the settings overwritten
+	uint8_t data[NUM_PARAMS - PAR_BEGINNING_OF_GLOBALS];
+	if(f_read((FIL*)&SDFile,data,numGlobals,&bytesRead) != FR_OK || bytesRead != numGlobals) return 0;
+	memcpy(&activeParameters[PAR_BEGINNING_OF_GLOBALS],data,numGlobals);
+	return 1;
 
 #endif
 #endif
@@ -1151,6 +1134,9 @@ FRESULT preset_loadLastUsedProjectNrFromSD(uint8_t* projNr)
     res=f_read((FIL*)&SDFile, projNr,1, &bytesRead);
 	//close the file handle
 	f_close((FIL*)&SDFile);
+	//used as index into the project names (64 projects)
+	if(*projNr >= NUM_KIT_SLOTS)
+		*projNr = 0;
 
 
 	return res;
@@ -1162,7 +1148,7 @@ FRESULT preset_saveLastUsedProjectNrToSD(uint8_t projNr)
     FRESULT res;
 
 	//open the file
-	res = f_open((FIL*)&SDFile,"/proj.idx",FA_CREATE_ALWAYS | FA_WRITE);
+	res = preset_fopenWrite("/proj.idx");
 	if(res != FR_OK)
 	{
 		//close the file handle
@@ -1171,7 +1157,7 @@ FRESULT preset_saveLastUsedProjectNrToSD(uint8_t projNr)
 	}
 
 	unsigned int bytesWritten;
-	res = f_write((FIL*)&SDFile,&projNr,1,&bytesWritten);
+	res = preset_fwrite((FIL*)&SDFile,&projNr,1,&bytesWritten);
 	if(res != FR_OK)
 	{
 		//close the file handle
@@ -1180,7 +1166,7 @@ FRESULT preset_saveLastUsedProjectNrToSD(uint8_t projNr)
 	}
 
 	//close the file
-	f_close((FIL*)&SDFile);
+	res = preset_fcloseWrite();
 
 	//f_unmount((TCHAR const*)SDPath);
 	return res;
@@ -1643,9 +1629,9 @@ static void preset_writePatternData(uint8_t patternNr)
 		//---------------  write the step data (note, vol, prob, autom.) ---------------
 		for(uint8_t trk=0; trk<NUM_TRACKS;trk++)
 		{
-			f_write((FIL*)&SDFile,(const void*)&seq_patternSet.seq_subStepPattern[patternNr][trk][0],sizeof(Step)*STEPS_PER_PATTERN,&bytesWritten);
+			preset_fwrite((FIL*)&SDFile,(const void*)&seq_patternSet.seq_subStepPattern[patternNr][trk][0],sizeof(Step)*STEPS_PER_PATTERN,&bytesWritten);
 
-			f_write((FIL*)&SDFile,(const void*)&seq_patternSet.seq_stepTiming[patternNr][trk][0],sizeof(uint8_t)*STEPS_PER_PATTERN,&bytesWritten);
+			preset_fwrite((FIL*)&SDFile,(const void*)&seq_patternSet.seq_stepTiming[patternNr][trk][0],sizeof(uint8_t)*STEPS_PER_PATTERN,&bytesWritten);
 		}
 
 		//--------------- now the main step data ---------------
@@ -1654,15 +1640,15 @@ static void preset_writePatternData(uint8_t patternNr)
 			for(uint8_t bar=0;bar<NUM_BARS; bar++)
 			{
 				const uint16_t mainStepData = seq_patternSet.seq_mainSteps[bar][patternNr][trk];
-				f_write((FIL*)&SDFile,(const void*)&mainStepData,sizeof(uint16_t),&bytesWritten);
+				preset_fwrite((FIL*)&SDFile,(const void*)&mainStepData,sizeof(uint16_t),&bytesWritten);
 			}
 		}
 
 		//----- shuffle setting ------
 
 
-		//f_write((FIL*)&SDFile,(const void*)&activeParameters[PAR_SHUFFLE],sizeof(uint8_t),&bytesWritten);
-		f_write((FIL*)&SDFile,(const void*)&seq_patternSet.shuffle[patternNr],sizeof(uint8_t),&bytesWritten);
+		//preset_fwrite((FIL*)&SDFile,(const void*)&activeParameters[PAR_SHUFFLE],sizeof(uint8_t),&bytesWritten);
+		preset_fwrite((FIL*)&SDFile,(const void*)&seq_patternSet.shuffle[patternNr],sizeof(uint8_t),&bytesWritten);
 
 		//----- pattern/track lengths ------
 		// we reuse the same call from above (when saving main step data)
@@ -1673,11 +1659,11 @@ static void preset_writePatternData(uint8_t patternNr)
 		for(uint8_t trk=0; trk<NUM_TRACKS;trk++)
 		{
 				length = seq_patternSet.length[patternNr][trk] ;//seq_patternSet.seq_mainSteps[bar][pat][trk];
-				f_write((FIL*)&SDFile,(const void*)&length,sizeof(uint8_t),&bytesWritten);
+				preset_fwrite((FIL*)&SDFile,(const void*)&length,sizeof(uint8_t),&bytesWritten);
 		}
 
 		//write associated kit nr
-		f_write((FIL*)&SDFile,&seq_patternSet.kitNr[patternNr],sizeof(uint8_t),&bytesWritten);
+		preset_fwrite((FIL*)&SDFile,&seq_patternSet.kitNr[patternNr],sizeof(uint8_t),&bytesWritten);
 
 		//the extra parameter locks (custom firmware)
 		preset_writeLockPool(patternNr);
@@ -1704,7 +1690,7 @@ void preset_savePatternTemp(uint8_t presetNr)
 	f_open((FIL*)&SDFile,filename,FA_CREATE_ALWAYS | FA_WRITE);
 
 	//write preset name to file
-	f_write((FIL*)&SDFile,(void*)preset_currentName,8,&bytesWritten);
+	preset_fwrite((FIL*)&SDFile,(void*)preset_currentName,8,&bytesWritten);
 
 	preset_writePatternData();
 
@@ -1733,26 +1719,26 @@ FRESULT preset_savePatternSD(uint8_t presetNr)
 	//sprintf(filename,"p%03d.pat",presetNr);
 	preset_makeFileNameSave(filename,presetNr,FEXT_PAT, savefileNames[presetNr][PATTERN_NAMES]);
 	//open the file
-	res = f_open((FIL*)&SDFile,filename,FA_CREATE_ALWAYS | FA_WRITE);
+	res = preset_fopenWrite(filename);
 	if(res != FR_OK) return res;
 
-	//write preset name to file
-	res = f_write((FIL*)&SDFile,(void*)savefileNames[presetNr][PATTERN_NAMES],8,&bytesWritten);
-	if(res != FR_OK) return res;
+	//write preset name to file (after an error the writes are skipped, the close reports it)
+	preset_fwrite((FIL*)&SDFile,(void*)savefileNames[presetNr][PATTERN_NAMES],8,&bytesWritten);
 	//write version tag
-	res = f_write((FIL*)&SDFile,"PatV03",6,&bytesWritten);
-	if(res != FR_OK) return res;
+	preset_fwrite((FIL*)&SDFile,"PatV03",6,&bytesWritten);
 
 	//write pattern data
 	preset_writePatternData(presetNr);
 
 	//close the file
-	f_close((FIL*)&SDFile);
+	res = preset_fcloseWrite();
+	if(res == FR_OK)
+		res = preset_removeOtherFiles(presetNr, FEXT_PAT, filename);
 	
 	//reset the lcd
 	menu_repaintAll();
 	
-	return FR_OK;
+	return res;
 }
 
 //----------------------------------------------------
@@ -1905,9 +1891,9 @@ static uint8_t preset_readPatternData(uint8_t patternNr, uint8_t dataVersion)
 
 				if( (pat == seq_activePattern) && seq_isRunning() )
 				{
-					seq_tmpPattern.length[trk] = next;
+					seq_tmpPattern.length[trk] = preset_validLength(next);
 				} else {
-					seq_patternSet.length[pat][trk] = next;
+					seq_patternSet.length[pat][trk] = preset_validLength(next);
 				}
 			}
 		}
@@ -1924,117 +1910,87 @@ static uint8_t preset_readPatternData(uint8_t patternNr, uint8_t dataVersion)
 
 	return success;
 #else
-
 	// note that the pattern length data is no longer stored in the same way.
 	// This means that loading old patterns with non-standard length, the length will be
 	// ignored and a standard length used. I think it's acceptable as long as users are aware of this.
-
+	//everything is read into preset_patternBuffer first and only copied into the pattern after the
+	//whole file was read: a damaged file leaves the pattern as it was
+	PatternFileData* buf = &preset_patternBuffer;
 	UINT bytesRead;
-	uint8_t success=1; // start off succeeding
 	uint8_t next=0;
-
 	// ---------- Load step data first
-
 	// load step data
-
-
-
 	for(uint8_t trk=0; trk<NUM_TRACKS;trk++)
 	{
-
-		f_read((FIL*)&SDFile,(void*)&seq_patternSet.seq_subStepPattern[patternNr][trk][0],sizeof(Step)*STEPS_PER_PATTERN,&bytesRead);
-
+		f_read((FIL*)&SDFile,(void*)&buf->steps[trk][0],sizeof(Step)*STEPS_PER_PATTERN,&bytesRead);
 		if(bytesRead!=sizeof(Step)*(STEPS_PER_PATTERN))
-		{
-			success=0;
-			break; // file error, or we ran out of file (eof)
-		}
-
+			return 0; // file error, or we ran out of file (eof)
 		//Pattern V3 and up => flam added
 		if(dataVersion > 2)
 		{
-			f_read((FIL*)&SDFile,(void*)&seq_patternSet.seq_stepTiming[patternNr][trk][0],sizeof(uint8_t)*STEPS_PER_PATTERN,&bytesRead);
-
-			if(bytesRead!=sizeof(uint8_t)*(STEPS_PER_PATTERN))
+			f_read((FIL*)&SDFile,(void*)&buf->timing[trk][0],sizeof(StepTiming)*STEPS_PER_PATTERN,&bytesRead);
+			if(bytesRead!=sizeof(StepTiming)*(STEPS_PER_PATTERN))
+				return 0; // file error, or we ran out of file (eof)
+		}
+		else
+		{
+			//older files: no flam, no shift
+			for(uint8_t stp=0; stp<STEPS_PER_PATTERN; stp++)
 			{
-				success=0;
-				break; // file error, or we ran out of file (eof)
+				buf->timing[trk][stp].flam = 0;
+				buf->timing[trk][stp].shift = 7;   // 7 = no shift
 			}
 		}
-
 	}
-
-
-
 	// ---------- load the main step data next
-	uint16_t mainStepData;
-
-
-		for(uint8_t trk=0; trk<NUM_TRACKS;trk++)
+	for(uint8_t trk=0; trk<NUM_TRACKS;trk++)
+	{
+		for(uint8_t bar=0;bar<NUM_BARS; bar++)
 		{
-			for(uint8_t bar=0;bar<NUM_BARS; bar++)
-			{
-				f_read((FIL*)&SDFile,(void*)&mainStepData,sizeof(uint16_t),&bytesRead);
-
-				if( bytesRead==sizeof(uint16_t)) {
-					seq_patternSet.seq_mainSteps[bar][patternNr][trk] = mainStepData;
-				}
-				 else {
-						success=0;
-						break;
-					}
-			}
-		}
-
-
-
-	// ------------ shuffle settings
-	if(success) {
-		//load the shuffle settings
-		f_read((FIL*)&SDFile,(void*)&seq_patternSet.shuffle[patternNr],sizeof(uint8_t),&bytesRead);
-		//and update on cortex
-		if(bytesRead)
-		{
-
-			//activeParameters[PAR_SHUFFLE] = seq_patternSet.shuffle[patternNr];
-			//frontPanel_sendData(SEQ_CC,SEQ_SHUFFLE,parameter_values[PAR_SHUFFLE]);
-
-			//seq_setShuffle(activeParameters[PAR_SHUFFLE]/127.f);
-		}
-		else {
-			success=0;
+			f_read((FIL*)&SDFile,(void*)&buf->mainSteps[bar][trk],sizeof(uint16_t),&bytesRead);
+			if( bytesRead!=sizeof(uint16_t))
+				return 0;
 		}
 	}
-
+	// ------------ shuffle settings
+	f_read((FIL*)&SDFile,(void*)&buf->shuffle,sizeof(uint8_t),&bytesRead);
+	if(!bytesRead)
+		return 0;
 	// ----------- Pattern/track lengths
 	// -- AS this might not exist in the saved data file, we still want success
-	if(success) {
-
-			for(uint8_t trk=0; trk<NUM_TRACKS;trk++)
-			{
-				f_read((FIL*)&SDFile,(void*)&next,sizeof(uint8_t),&bytesRead);
-				seq_patternSet.length[patternNr][trk] = next;
-			}
-
-		success=1; // just to document that we don't consider this a failure, we just didn't read the bytes for this
+	for(uint8_t trk=0; trk<NUM_TRACKS;trk++)
+	{
+		f_read((FIL*)&SDFile,(void*)&next,sizeof(uint8_t),&bytesRead);
+		buf->length[trk] = preset_validLength(next);
 	}
-
+	//V1 files have no kit nr: the pattern keeps its kit nr
+	buf->kitNr = seq_patternSet.kitNr[patternNr];
 	if(dataVersion > 1)
 	{
-		f_read((FIL*)&SDFile,(void*)&seq_patternSet.kitNr[patternNr],sizeof(uint8_t),&bytesRead);
-		if(bytesRead == 0) success = 0;
-
+		f_read((FIL*)&SDFile,(void*)&buf->kitNr,sizeof(uint8_t),&bytesRead);
+		if(bytesRead == 0)
+			return 0;
 	}
 
-	//the extra parameter locks (custom firmware), only behind complete data
-	if(success && (dataVersion > 2))
-		preset_readLockPool(patternNr);
-	else
-		seq_getLockPool(patternNr)->count = 0;
+	//the extra parameter locks (custom firmware) behind the V3 data, read into a buffer
+	//as well; older files and files without them have none
+	preset_lockPoolBuffer.count = 0;
+	if(dataVersion > 2)
+		preset_readLockPool(&preset_lockPoolBuffer);
 
-	return success;
+	//complete: copy into the pattern
+	memcpy(seq_patternSet.seq_subStepPattern[patternNr], buf->steps, sizeof(buf->steps));
+	memcpy(seq_patternSet.seq_stepTiming[patternNr], buf->timing, sizeof(buf->timing));
+	for(uint8_t bar=0;bar<NUM_BARS; bar++)
+		memcpy(seq_patternSet.seq_mainSteps[bar][patternNr], buf->mainSteps[bar], sizeof(buf->mainSteps[bar]));
+	memcpy(seq_patternSet.length[patternNr], buf->length, sizeof(buf->length));
+	seq_patternSet.shuffle[patternNr] = buf->shuffle;
+	seq_patternSet.kitNr[patternNr] = buf->kitNr;
+	preset_validateKitNr(patternNr);
+	//(after the steps: the pool check compares its locks with the steps' own)
+	seq_setLockPool(patternNr, &preset_lockPoolBuffer);
+	return 1;
 #endif
-
 }
 //----------------------------------------------------
 /*
@@ -2133,7 +2089,7 @@ FRESULT preset_loadPatternSD(uint8_t presetNr)
 		fileVersion = 1; //re-assign since atoi() broke the 1
 		f_lseek((FIL*)&SDFile, f_tell((FIL*)&SDFile) - 6);
 	}
-	//f_write((FIL*)&SDFile,"PatV02",6,&bytesWritten);
+	//preset_fwrite((FIL*)&SDFile,"PatV02",6,&bytesWritten);
 
 	if(!preset_readPatternData(presetNr, fileVersion))
 	{
@@ -2362,7 +2318,8 @@ FRESULT preset_saveProject(uint8_t presetNr)
 	FRESULT res;
 	FILINFO fno;
 
-	preset_saveDrumsetRam(menu_selectedPresetNr[SAVE_TYPE_KIT], 0);
+	//the current kit (not the one last scrolled to on the load/save page)
+	preset_saveDrumsetRam(menu_loadedPresetNr[CURRENT_KIT], 0);
 	preset_savePatternRAM(seq_activePattern);
 
 #if USE_INTERRUPT_ONLY_DURING_SAVE_PROJ
@@ -2389,65 +2346,30 @@ FRESULT preset_saveProject(uint8_t presetNr)
 		return res;
 	}
 */
-	//change project folder
-	sprintf(currentFolder, "/proj%02d", presetNr);
+	//write into a new folder and replace the project folder only when everything was written:
+	//a failed save (full or bad card) leaves the saved project as it was
+	char newFolder[12];
+	char oldFolder[12];
+	preset_projectFolderName(currentFolder, presetNr);
+	sprintf(newFolder, "/proj%02d" PROJ_NEW_SUFFIX, presetNr);
+	sprintf(oldFolder, "/proj%02d" PROJ_OLD_SUFFIX, presetNr);
 
-	res = f_stat(currentFolder, &fno);
-	if(res == FR_NO_FILE)
-	{
+	//leftovers of an interrupted save
+	f_chdir("/");
+	res = preset_removeFolder(newFolder);
+	if(res == FR_OK)
+		res = preset_removeFolder(oldFolder);
+	//a new project gets an empty folder first: /projNN is only missing between the renames below
+	if(res == FR_OK && f_stat(currentFolder, &fno) == FR_NO_FILE)
 		res = f_mkdir(currentFolder);
-		if(res == FR_OK)
-		{
-			f_chdir(currentFolder);
-		}
-		else
-		{
-			lcd_process_display_interrupt = 1;
-			preset_initTmpFolder();
-#if USE_INTERRUPT_ONLY_DURING_SAVE_PROJ
-			HAL_TIM_Base_Stop_IT(&htim2);	//calc sample interrupt - prio 1
-#else
+	if(res == FR_OK)
+		res = f_mkdir(newFolder);
+	if(res == FR_OK)
+		res = f_chdir(newFolder);
+	if(res != FR_OK)
+		goto saveFailed;
+	preset_writingNewFolder = 1;
 
-#endif
-
-
-			return res;
-		}
-	}
-	else
-	{
-		//empty_directory() builds the paths of the files in its buffer: not in
-		//currentFolder (13 bytes), that overwrote the name of kit 1 behind it
-		char path[EMPTY_DIR_PATH_LEN];
-		strcpy(path, currentFolder);
-		res = empty_directory(path);
-		if(res != FR_OK)
-		{
-			lcd_process_display_interrupt = 1;
-			preset_initTmpFolder();
-#if USE_INTERRUPT_ONLY_DURING_SAVE_PROJ
-			HAL_TIM_Base_Stop_IT(&htim2);	//calc sample interrupt - prio 1
-#else
-
-#endif
-
-			return res;
-		}
-
-		res = f_chdir(currentFolder);
-		if(res != FR_OK)
-		{
-			lcd_process_display_interrupt = 1;
-			preset_initTmpFolder();
-#if USE_INTERRUPT_ONLY_DURING_SAVE_PROJ
-			HAL_TIM_Base_Stop_IT(&htim2);	//calc sample interrupt - prio 1
-#else
-
-#endif
-
-			return res;
-		};
-	}
 	//save data
 
 #if 1
@@ -2458,38 +2380,24 @@ FRESULT preset_saveProject(uint8_t presetNr)
 
 	//Save Project name
 	//open the file
-	res = f_open((FIL*)&SDFile,"prj.nfo",FA_CREATE_ALWAYS | FA_WRITE);
+	res = preset_fopenWrite("prj.nfo");
 	if(res != FR_OK) {
-		lcd_process_display_interrupt = 1;
-		preset_initTmpFolder();
-#if USE_INTERRUPT_ONLY_DURING_SAVE_PROJ
-			HAL_TIM_Base_Stop_IT(&htim2);	//calc sample interrupt - prio 1
-#else
-
-#endif
-
-		return res;
+		goto saveFailed;
 	}
 	unsigned int bytesWritten;
 	//write preset name to file
-	res = f_write((FIL*)&SDFile,(void*)savefileNames[presetNr][PROJECT_NAMES],8,&bytesWritten);
+	preset_fwrite((FIL*)&SDFile,(void*)savefileNames[presetNr][PROJECT_NAMES],8,&bytesWritten);
+	res = preset_fcloseWrite();
 	if(res != FR_OK) {
-		lcd_process_display_interrupt = 1;
-		preset_initTmpFolder();
-#if USE_INTERRUPT_ONLY_DURING_SAVE_PROJ
-			HAL_TIM_Base_Stop_IT(&htim2);	//calc sample interrupt - prio 1
-#else
-
-#endif
-
-		return res;
+		goto saveFailed;
 	}
-	//close the file
-	f_close((FIL*)&SDFile);
 
 //	soundengine_process();
 	//save globals
-	preset_saveGlobals();
+	res = preset_saveGlobals();
+	if(res != FR_OK) {
+		goto saveFailed;
+	}
 	//save all drumkits, patterns and songs
 	for(uint8_t i=0;i<NUM_KIT_SLOTS;i++)
 	{
@@ -2498,54 +2406,60 @@ FRESULT preset_saveProject(uint8_t presetNr)
 		lcd_string(text);
 	//	soundengine_process();
 		res = preset_saveDrumsetSD(i, 0);
-		if(res != FR_OK) {
-			lcd_process_display_interrupt = 1;
-			preset_initTmpFolder();
-#if USE_INTERRUPT_ONLY_DURING_SAVE_PROJ
-			HAL_TIM_Base_Stop_IT(&htim2);	//calc sample interrupt - prio 1
-#else
-
-#endif
-
-			return res;
-		}
+		if(res != FR_OK)
+			goto saveFailed;
 	//	soundengine_process();
 		res = preset_savePatternSD(i);
-		if(res != FR_OK) {
-			lcd_process_display_interrupt = 1;
-			preset_initTmpFolder();
-#if USE_INTERRUPT_ONLY_DURING_SAVE_PROJ
-			HAL_TIM_Base_Stop_IT(&htim2);	//calc sample interrupt - prio 1
-#else
-
-#endif
-			return res;
-		}
+		if(res != FR_OK)
+			goto saveFailed;
 	//	soundengine_process();
 		res = preset_saveSongSD(i);
-		if(res != FR_OK) {
-			lcd_process_display_interrupt = 1;
-			preset_initTmpFolder();
+		if(res != FR_OK)
+			goto saveFailed;
+	}
+
+	preset_writingNewFolder = 0;
+
+	//complete: replace the project folder (power off in between: preset_projectFolderName() finishes it)
+	f_chdir("/");
+	res = f_rename(currentFolder, oldFolder);
+	if(res != FR_OK)
+		goto saveFailed;
+	res = f_rename(newFolder, currentFolder);
+	if(res != FR_OK)
+	{
+		f_rename(oldFolder, currentFolder);
+		goto saveFailed;
+	}
+	//the save is done: if this fails, the next save removes the old folder
+	preset_removeFolder(oldFolder);
+
+	//(also changes into /tmp) still with the audio interrupt running: the main loop doesn't
+	//render audio until this function returns (was after stopping it: audio dropouts)
+	preset_clearTmpFolder();
+
+	lcd_process_display_interrupt = 1;
 #if USE_INTERRUPT_ONLY_DURING_SAVE_PROJ
-			HAL_TIM_Base_Stop_IT(&htim2);	//calc sample interrupt - prio 1
+	HAL_TIM_Base_Stop_IT(&htim2);	//calc sample interrupt - prio 1
 #else
 
 #endif
-			return res;
-		}
-	}
 
+	return FR_OK;
+
+saveFailed:
+	preset_writingNewFolder = 0;
+	f_close((FIL*)&SDFile);
+	f_chdir("/");
+	preset_removeFolder(newFolder);
 	lcd_process_display_interrupt = 1;
 	preset_initTmpFolder();
 #if USE_INTERRUPT_ONLY_DURING_SAVE_PROJ
-			HAL_TIM_Base_Stop_IT(&htim2);	//calc sample interrupt - prio 1
+	HAL_TIM_Base_Stop_IT(&htim2);	//calc sample interrupt - prio 1
 #else
 
 #endif
-
-			preset_clearTmpFolder();
-
-	return FR_OK;
+	return res;
 
 #else
 #if USE_SD_CARD
@@ -2563,11 +2477,11 @@ FRESULT preset_saveProject(uint8_t presetNr)
 
 	unsigned int bytesWritten;
 	//write preset name to file
-	f_write((FIL*)&SDFile,(void*)savefileNames[KIT_NAMES][presetNr],8,&bytesWritten);
+	preset_fwrite((FIL*)&SDFile,(void*)savefileNames[KIT_NAMES][presetNr],8,&bytesWritten);
 
 	//write the version
 	filename[0]=FILE_VERSION;
-	f_write((FIL*)&SDFile, filename, 1, &bytesWritten);
+	preset_fwrite((FIL*)&SDFile, filename, 1, &bytesWritten);
 
 	memset(filename,0xFF,GEN_BUF_LEN); // reuse this as our buffer for padding
 
@@ -2581,9 +2495,9 @@ FRESULT preset_saveProject(uint8_t presetNr)
 
 	} else {
 		// write the bpm
-		f_write((FIL*)&SDFile, &activeParameters[PAR_BPM], 1, &bytesWritten);
+		preset_fwrite((FIL*)&SDFile, &activeParameters[PAR_BPM], 1, &bytesWritten);
 		// bar reset mode
-		f_write((FIL*)&SDFile, &activeParameters[PAR_BAR_RESET_MODE], 1, &bytesWritten);
+		preset_fwrite((FIL*)&SDFile, &activeParameters[PAR_BAR_RESET_MODE], 1, &bytesWritten);
 
 		remain=	64 - (1+1);
 	}
@@ -2594,7 +2508,7 @@ FRESULT preset_saveProject(uint8_t presetNr)
 			siz=(uint8_t)remain;
 		else
 			siz=GEN_BUF_LEN;
-		f_write((FIL*)&SDFile, filename, siz, &bytesWritten);
+		preset_fwrite((FIL*)&SDFile, filename, siz, &bytesWritten);
 		remain -=siz;
 	}
 
@@ -2609,7 +2523,7 @@ FRESULT preset_saveProject(uint8_t presetNr)
 			siz=(uint8_t)remain;
 		else
 			siz=GEN_BUF_LEN;
-		f_write((FIL*)&SDFile, filename, siz, &bytesWritten);
+		preset_fwrite((FIL*)&SDFile, filename, siz, &bytesWritten);
 		remain -=siz;
 	}
 
@@ -2673,11 +2587,11 @@ FRESULT preset_saveSongSD(uint8_t songNr)
 	unsigned int bytesWritten;
 	preset_makeFileNameSave(filename,songNr,FEXT_SONG, savefileNames[songNr][SONG_NAMES]);
 	//open the file
-	res = f_open((FIL*)&SDFile,filename,FA_CREATE_ALWAYS | FA_WRITE);
+	res = preset_fopenWrite(filename);
 	if(res!=FR_OK)
 		return res; //file open error... maybe the file does not exist?
 	//write name
-	res = f_write((FIL*)&SDFile,(void*)savefileNames[songNr][SONG_NAMES],8,&bytesWritten);
+	res = preset_fwrite((FIL*)&SDFile,(void*)savefileNames[songNr][SONG_NAMES],8,&bytesWritten);
 	if (res != FR_OK)
 	{
 		f_close((FIL*)&SDFile);
@@ -2685,7 +2599,7 @@ FRESULT preset_saveSongSD(uint8_t songNr)
 	}
 
 	//write song data
-	res = f_write((FIL*)&SDFile,seq_songData[songNr],MAX_SONG_LENGTH,&bytesWritten);
+	res = preset_fwrite((FIL*)&SDFile,seq_songData[songNr],MAX_SONG_LENGTH,&bytesWritten);
 	if (res != FR_OK)
 	{
 		f_close((FIL*)&SDFile);
@@ -2693,7 +2607,9 @@ FRESULT preset_saveSongSD(uint8_t songNr)
 	}
 
 	//close the file handle
-	res = f_close((FIL*)&SDFile);
+	res = preset_fcloseWrite();
+	if(res == FR_OK)
+		res = preset_removeOtherFiles(songNr, FEXT_SONG, filename);
 	return res;
 }
 
@@ -2705,7 +2621,7 @@ void preset_loadProjectNames(uint8_t projectNr)
 	FILINFO fno;
 
 	//change project folder
-	sprintf(currentFolder, "/proj%02d", projectNr);
+	preset_projectFolderName(currentFolder, projectNr);
 
 	res = f_stat(currentFolder, &fno);
 	if(res == FR_NO_FILE)
@@ -2779,7 +2695,7 @@ FRESULT preset_loadProject(uint8_t presetNr, uint8_t clearTmp)
 	lcd_string(PSTR("0%"));
 
 	//change project folder
-	sprintf(currentFolder, "/proj%02d", presetNr);
+	preset_projectFolderName(currentFolder, presetNr);
 
 	res = f_stat(currentFolder, &fno);
 	if(res == FR_NO_FILE)
@@ -3112,14 +3028,9 @@ static void preset_makeFileNameOld(char *buf, uint8_t num, uint8_t type)
 };
 
 
-//load uses wildcard to find a name of the pattern 00-*.ext
-static FRESULT preset_makeFileNameLoad(char *buf, uint8_t num, uint8_t type)
+//wildcard for the files of a slot: 00-*.ext
+static void preset_makeFileNamePattern(char *buf, uint8_t num, uint8_t type)
 {
-
-	FRESULT fr;     /* Return value */
-    DIR dj;         /* Directory object */
-    FILINFO fno;    /* File information */
-
 	const char *ext;
 	numtostrpu_2Bytes(&buf[0],num,'0');
 	buf[2] = '-';
@@ -3146,7 +3057,17 @@ static FRESULT preset_makeFileNameLoad(char *buf, uint8_t num, uint8_t type)
 	}
 	strcpy(&buf[4],ext);
 	buf[8] = 0;
+}
 
+//load uses wildcard to find a name of the pattern 00-*.ext
+static FRESULT preset_makeFileNameLoad(char *buf, uint8_t num, uint8_t type)
+{
+
+	FRESULT fr;     /* Return value */
+    DIR dj;         /* Directory object */
+    FILINFO fno;    /* File information */
+
+	preset_makeFileNamePattern(buf, num, type);
 
     fr = f_findfirst(&dj, &fno, "", buf);  /* Start to search for preset files */
     f_closedir(&dj);
@@ -3157,6 +3078,43 @@ static FRESULT preset_makeFileNameLoad(char *buf, uint8_t num, uint8_t type)
     }
 
     return FR_NO_FILE;
+}
+
+//the file name contains the slot's name: after saving, remove the slot's files with other names
+//(otherwise loading may find the old file first)
+static FRESULT preset_removeOtherFiles(uint8_t num, uint8_t type, const char *keep)
+{
+	char pattern[9];
+	char name[13];
+	DIR dj;
+	FILINFO fno;
+	FRESULT fr;
+
+	if(preset_writingNewFolder)
+		return FR_OK;
+	preset_makeFileNamePattern(pattern, num, type);
+	while(1)
+	{
+		uint8_t found = 0;
+		fr = f_findfirst(&dj, &fno, "", pattern);
+		while(fr == FR_OK && fno.fname[0])
+		{
+			if(strcasecmp(fno.fname, keep) != 0)
+			{
+				strcpy(name, fno.fname);
+				found = 1;
+				break;
+			}
+			fr = f_findnext(&dj, &fno);
+		}
+		f_closedir(&dj);
+		if(!found)
+			return fr;
+		//only one open object at a time (_FS_LOCK): unlink after closing the directory
+		fr = f_unlink(name);
+		if(fr != FR_OK)
+			return fr;
+	}
 }
 
 void clearIllegalCharacters(char *input, char* output, uint8_t sz)

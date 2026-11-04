@@ -2669,6 +2669,23 @@ LockPool* seq_getLockPool(uint8_t pattern)
 	return &seq_lockPool[pattern < NUM_PATTERN ? pattern : 0];
 }
 
+// replaces the extra locks of a pattern (a loaded pattern file): the audio interrupt
+// reads the pool, so it is emptied first, filled and then gets its count
+void seq_setLockPool(uint8_t pattern, const LockPool* src)
+{
+	if(pattern >= NUM_PATTERN)
+		return;
+	LockPool* p = &seq_lockPool[pattern];
+	uint8_t count = src->count;
+	if(count > LOCK_POOL_SIZE) count = LOCK_POOL_SIZE;
+	p->count = 0;
+	SEQ_BARRIER();
+	memcpy(p->lock, src->lock, count * sizeof(ExtraLock));
+	SEQ_BARRIER();
+	p->count = count;
+	seq_checkLockPool(pattern);
+}
+
 // index of the extra lock of parameter nr on a step, -1 if it has none
 static int16_t seq_findExtraLock(const LockPool* p, const uint8_t track, const uint8_t step, const uint8_t nr)
 {
