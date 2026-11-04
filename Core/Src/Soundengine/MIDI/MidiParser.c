@@ -9,6 +9,9 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * fixes from OpenElixir-02 by Moritz Waser (see the git history).
  */
 
 
@@ -133,6 +136,10 @@ float midiParser_calcDetune(uint8_t value)
 //-----------------------------------------------------------
 static void midiParser_nrpnHandler(uint16_t value)
 {
+	//the sound engine handles NRPNs 0-255 (as CC2 messages, data1 is 8 bit);
+	//higher ones (e.g. the mutes 1000-1006) are for the front panel only
+	if(midiParser_activeNrpnNumber > 0xff)
+		return;
 	MidiMsg msg2;
 	msg2.status = MIDI_CC2;
 	msg2.data1 = midiParser_activeNrpnNumber;
@@ -907,7 +914,8 @@ void midiParser_ccHandler(MidiMsg msg, uint8_t updateOriginalValue, uint8_t isFl
 	{
 		const uint16_t paramNr = msg.data1 + 1 + 127;
 
-		if(updateOriginalValue && !isFloatModulator) {
+		//(paramNr goes up to 383: NRPNs 128-255, e.g. the mutes 200-206)
+		if(updateOriginalValue && !isFloatModulator && paramNr < sizeof(midiParser_originalCcValues)) {
 			midiParser_originalCcValues[paramNr] = value.itg;
 		}
 		switch(msg.data1)
@@ -1368,6 +1376,12 @@ void midiParser_ccHandler(MidiMsg msg, uint8_t updateOriginalValue, uint8_t isFl
 				break;
 
 			case CC2_FX_TYPE:
+				//out of range (NRPN/modulation 0-127): the FX page would read past its sub pages
+#if USE_REVERB
+				if(value.itg > FX_REVERB) break;
+#else
+				if(value.itg > FX_DELAY) break;
+#endif
 #if 1
 #if USE_REVERB
 				if((value.itg == FX_REVERB) && (fxBus.fxType != value.itg)) FxBus_prepareFxChange();
@@ -1883,8 +1897,10 @@ void midiParser_parseMidiMessage(MidiMsg msg)
 			{
 				if((midiParser_txRxFilter & MIDI_FILTER_CC) && (midiParser_isValidChannel(chanonly) ))
 				{
-					//record automation if record is turned on
-					seq_recordAutomation(frontParser_activeTrack, msg.data1, msg.data2);
+					//record automation if record is turned on (not bank select and the
+					//NRPN control CCs: they are no sound parameters)
+					if(msg.data1 != CC_BANK_CHANGE && msg.data1 != NRPN_DATA_ENTRY_COARSE && msg.data1 != NRPN_FINE && msg.data1 != NRPN_COARSE)
+						seq_recordAutomation(frontParser_activeTrack, msg.data1, msg.data2);
 
 					//handle midi data
 					midiParser_ccHandler(msg,1, 0, 0.f);
@@ -1898,9 +1914,12 @@ void midiParser_parseMidiMessage(MidiMsg msg)
 			{
 
 				// respond to CC message. This responds only when global channel or voice channel matches the cc message's channel
-				if((midiParser_txRxFilter & MIDI_FILTER_CC) && ((chanonly == midi_MidiChannels[voiceNr]) || (chanonly == midi_MidiChannels[7]) )) {
-					//record automation if record is turned on
-					seq_recordAutomation(frontParser_activeTrack, msg.data1, msg.data2);
+				// (voiceNr is 1-based here, midi_MidiChannels 0-based)
+				if((midiParser_txRxFilter & MIDI_FILTER_CC) && ((chanonly == midi_MidiChannels[voiceNr-1]) || (chanonly == midi_MidiChannels[7]) )) {
+					//record automation if record is turned on (not bank select and the
+					//NRPN control CCs: they are no sound parameters)
+					if(msg.data1 != CC_BANK_CHANGE && msg.data1 != NRPN_DATA_ENTRY_COARSE && msg.data1 != NRPN_FINE && msg.data1 != NRPN_COARSE)
+						seq_recordAutomation(frontParser_activeTrack, msg.data1, msg.data2);
 
 					//handle midi data
 					midiParser_ccHandler(msg,1, 0, 0.f);
@@ -1970,6 +1989,20 @@ void midiParser_parseUartData(unsigned char data)
   // {
   //   return;
   // }
+
+	/* System realtime bytes (clock, start, stop, ...) may come between the bytes of
+	   any other message: handle them on their own, without touching the message
+	   being received (or MIDI thru would send them with its data bytes) */
+	if(data >= 0xF8)
+	{
+		MidiMsg realtime = midiMsg_tmp;
+		realtime.status = data;
+		realtime.bits.length = 0;
+		realtime.bits.sysxbyte = 0;
+		realtime.bits.source = midiSourceMIDI;
+		midiParser_parseMidiMessage(realtime);
+		return;
+	}
 
 	if(data & 0x80)
   {

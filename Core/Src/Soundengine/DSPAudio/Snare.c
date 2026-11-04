@@ -13,6 +13,7 @@
  * Modified 2026 for a custom firmware (not an official Erica Synths release):
  * triggers the 808/909 instruments (AnalogModels.c) and passes them the amp
  * EG level and decay.
+ * Also fixes from OpenElixir-02 by Moritz Waser (see the git history).
  */
 
 
@@ -203,7 +204,8 @@ void Snare_calcSyncBlock(int16_t* buf, const uint8_t size)
 			//add transient sample
 			//tmp	= __QADD16(transBuf[j],(int16_t)tmp);
 			tmp	+= transBuf[j];
-			buf[j] =   snareVoice.combinedVolume  * tmp * calcOnePole( &snareVoice.FaderVolumeFilter, adc_getFaderVolume(3));
+			//osc + noise + transient can exceed full scale: saturate (it wrapped)
+			buf[j] = __SSAT((int32_t)(snareVoice.combinedVolume  * tmp * calcOnePole( &snareVoice.FaderVolumeFilter, adc_getFaderVolume(3))), 16);
 
 #else
 
@@ -228,7 +230,7 @@ void Snare_calcSyncBlock(int16_t* buf, const uint8_t size)
 			//add transient sample
 			//tmp	= __QADD16(transBuf[j],(int16_t)tmp);
 			tmp	+= transBuf[j];
-			buf[j] =  snareVoice.combinedVolume * tmp * calcOnePole( &snareVoice.FaderVolumeFilter, adc_getFaderVolume(3));
+			buf[j] = __SSAT((int32_t)(snareVoice.combinedVolume * tmp * calcOnePole( &snareVoice.FaderVolumeFilter, adc_getFaderVolume(3))), 16);
 #else
 			//add filter to buffer
 			buf[j] *= snareVoice.mix;

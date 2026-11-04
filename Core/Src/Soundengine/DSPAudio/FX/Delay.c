@@ -10,6 +10,9 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * fixes from OpenElixir-02 by Moritz Waser (see the git history).
  */
 
 
@@ -92,6 +95,12 @@ void Delay_calcBuffer(Delay* d, uint8_t bufferIdx)
 
 void Delay_processPingPong(Delay *d, int16_t *fxBuffer,int16_t* outL, int16_t* outR, uint16_t size,  uint8_t channels, float dryWet)
 {
+	//each ping-pong line uses half of the buffer. After switching from the normal
+	//delay the pointers can still be in the upper half, and the right line
+	//would read and write up to 32 KB past FX_BUFFER: keep them inside.
+	d->oldRead	&= FX_BUFFER_SIZE>>1;
+	d->newRead	&= FX_BUFFER_SIZE>>1;
+	d->write	&= FX_BUFFER_SIZE>>1;
 
 	int32_t x;
 	int32_t* stereoOut = (int32_t*)outL;

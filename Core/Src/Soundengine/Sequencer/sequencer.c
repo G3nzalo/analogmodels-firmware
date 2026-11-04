@@ -14,6 +14,7 @@
  * seq_clearStepLocks() clears the parameter locks of a single step, and a
  * step plays up to NUM_STEP_LOCKS parameter locks: lock 1 and 2 in its Step,
  * the others from the lock pool of the pattern (seq_lockPool).
+ * Also fixes from OpenElixir-02 by Moritz Waser (see the git history).
  */
 
 
@@ -389,7 +390,7 @@ float seq_getDeltaTShuffleDelay(uint16_t bpm)
 	//--- calc deltaT ----
 	// for 4/4tel takt -> 1 beat = 4 main steps = 4*8 = 32 sub steps
 	// 120 bpm 4/4tel = 120 * 1 beat / 60sec = 120 * 32 in 60 sec;
-	dT 	= (1000*60)/bpm; 	//bei 12 = 500ms = time for one beat
+	dT 	= (1000*60.f)/bpm; 	//bei 12 = 500ms = time for one beat (float: the integer division ran up to 0.2 % fast)
 	dT /= 96.f; //we run the internal clock at 96ppq -> seq clock 32 ppq == prescaler 3, midi clock 24 ppq == prescale 4
 	dT *= 4;
 	//32.f;					// time for one beat / number of steps per beat
@@ -419,7 +420,7 @@ static void seq_calcDeltaT(uint16_t bpm, uint8_t isShuffled)
 	//--- calc deltaT ----
 	// for 4/4tel takt -> 1 beat = 4 main steps = 4*8 = 32 sub steps
 	// 120 bpm 4/4tel = 120 * 1 beat / 60sec = 120 * 32 in 60 sec;
-	seq_deltaT 	= (1000*60)/bpm; 	//bei 12 = 500ms = time for one beat
+	seq_deltaT 	= (1000*60.f)/bpm; 	//bei 12 = 500ms = time for one beat (float: the integer division ran up to 0.2 % fast)
 	seq_deltaT /= 96.f; //we run the internal clock at 96ppq -> seq clock 32 ppq == prescaler 3, midi clock 24 ppq == prescale 4
 	seq_deltaT *= 4;
 	//32.f;					// time for one beat / number of steps per beat
@@ -521,8 +522,11 @@ void seq_triggerVoice(uint8_t voiceNr, uint8_t vol, uint8_t note)
 
 	if(voiceNr > 6) return;
 
+	//the step index is -1 while stopped (e.g. rolls): no step to take automation and velocity from
+	const int8_t step = seq_stepIndex[voiceNr];
 
-	seq_parseAutomationNodes(voiceNr, seq_activePattern, (uint8_t)seq_stepIndex[voiceNr]);
+	//(a step of -1 has no locks: seq_getStepLocks() checks the step, the voice plays the kit sound)
+	seq_parseAutomationNodes(voiceNr, seq_activePattern, (uint8_t)step);
 
 	//turn the trigger off before sending the next one
 	/*
@@ -557,7 +561,7 @@ void seq_triggerVoice(uint8_t voiceNr, uint8_t vol, uint8_t note)
 #if USE_PATTERN_EDIT_BUFFER
 	seq_sendMidiNoteOn(midiChan, midiNote, patternBackupBuffer.seq_subStepPattern[voiceNr][seq_stepIndex[voiceNr]].volume&STEP_VOLUME_MASK);
 #else
-	seq_sendMidiNoteOn(midiChan, midiNote, seq_patternSet.seq_subStepPattern[seq_activePattern][voiceNr][seq_stepIndex[voiceNr]].volume&STEP_VOLUME_MASK);
+	seq_sendMidiNoteOn(midiChan, midiNote, step >= 0 ? seq_patternSet.seq_subStepPattern[seq_activePattern][voiceNr][step].volume&STEP_VOLUME_MASK : vol);
 #endif
 }
 //------------------------------------------------------------------------------
@@ -1122,6 +1126,9 @@ void seq_processFlam(uint8_t idx)
 
 	for(uint8_t track=0;track<NUM_TRACKS;track++)
 	{
+		//the step index is -1 until the first step (e.g. with external clock)
+		if(seq_stepIndex[track] < 0)
+			continue;
 		//if track is not muted
 		if(!(seq_mutedTracks & (1<<track) ) )
 		{
@@ -1321,21 +1328,27 @@ IN_ITCM_RAM void seq_nextStep()
 				seq_pendingPattern = rnd;
 			}
 			*/
-			if(seq_pendingPattern == SONG_END)
-			{
-				//TODO: check if this is enough? does GUI needs info?
-				seq_setRunning(0);
-				//make sure pending pattern does not remain at 64 resulting in a seg fault.
-				seq_pendingPattern = seq_activeSong[0];
-				if(seq_pendingPattern >= 64) seq_pendingPattern  = 0;
-				seq_songPositionPointer = 0;
-				return;
-			}
-			else if(seq_pendingPattern == SONG_LOOP)
+			if(seq_pendingPattern == SONG_LOOP)
 			{
 				//reset to song start
 				seq_pendingPattern = seq_activeSong[0];
 				seq_songPositionPointer = 0;
+			}
+			//the end of the song, or a loop to a song that has no pattern before its
+			//end/loop mark (that played "pattern 65" and edits went past the patterns)
+			if(seq_pendingPattern >= MAX_PATTERN)
+			{
+				seq_setRunning(0);
+				//make sure pending pattern does not remain at 64 resulting in a seg fault.
+				seq_pendingPattern = seq_activeSong[0];
+				if(seq_pendingPattern >= MAX_PATTERN) seq_pendingPattern  = 0;
+				//like pressing stop: MIDI stop, notes off, position reset, and tell
+				//the front panel (it still showed running, so the next start press stopped)
+				seq_resetPosition();
+				uart_sendFrontpanelByte(FRONT_SEQ_CC);
+				uart_sendFrontpanelByte(FRONT_SEQ_RUN_STOP);
+				uart_sendFrontpanelByte(0);
+				return;
 			}
 
 		}
@@ -2327,7 +2340,8 @@ uint8_t seq_isAutomationStepArmed()
 //------------------------------------------------------------------------
 void seq_recordAutomation(uint8_t voice, uint8_t dest, uint8_t value)
 {
-	if(seq_recordActive)
+	//(the step index is -1 while stopped)
+	if(seq_recordActive && seq_stepIndex[voice] >= 0)
 	{
 		//uint8_t quantizedStep = seq_quantize(seq_stepIndex[voice]);
 		const uint8_t step = seq_stepIndex[voice];
@@ -2654,6 +2668,23 @@ static uint8_t seq_isValidStep(const uint8_t pattern, const uint8_t track, const
 LockPool* seq_getLockPool(uint8_t pattern)
 {
 	return &seq_lockPool[pattern < NUM_PATTERN ? pattern : 0];
+}
+
+// replaces the extra locks of a pattern (a loaded pattern file): the audio interrupt
+// reads the pool, so it is emptied first, filled and then gets its count
+void seq_setLockPool(uint8_t pattern, const LockPool* src)
+{
+	if(pattern >= NUM_PATTERN)
+		return;
+	LockPool* p = &seq_lockPool[pattern];
+	uint8_t count = src->count;
+	if(count > LOCK_POOL_SIZE) count = LOCK_POOL_SIZE;
+	p->count = 0;
+	SEQ_BARRIER();
+	memcpy(p->lock, src->lock, count * sizeof(ExtraLock));
+	SEQ_BARRIER();
+	p->count = count;
+	seq_checkLockPool(pattern);
 }
 
 // index of the extra lock of parameter nr on a step, -1 if it has none

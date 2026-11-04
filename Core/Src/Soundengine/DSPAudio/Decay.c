@@ -9,6 +9,9 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * fixes from OpenElixir-02 by Moritz Waser (see the git history).
  */
 
 
@@ -73,7 +76,9 @@ void DecayEg_setDecay(DecayEg* eg, uint8_t data2)
 //--------------------------------------------------
 IN_ITCM_RAM void DecayEg_setSlope(DecayEg* eg, uint8_t data2)
 {
-	const float amount 	= ((data2/127.f)-0.5f)*2;
+	//127 gave amount 1 -> slope 2/0 = inf -> the EG output NaN and stopped the
+	//oscillator; there use the amp EG's maximum (SlopeEg2: factor 1.999)
+	const float amount 	= data2 < 127 ? ((data2/127.f)-0.5f)*2 : 0.5f*1.999f;
 	eg->slope 			= 2*amount/(1-amount);
 }
 //--------------------------------------------------

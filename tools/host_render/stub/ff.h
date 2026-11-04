@@ -37,6 +37,7 @@ FRESULT f_findfirst(DIR* dp, FILINFO* fno, const TCHAR* path, const TCHAR* patte
 FRESULT f_findnext(DIR* dp, FILINFO* fno);
 FRESULT f_mkdir(const TCHAR* path);
 FRESULT f_unlink(const TCHAR* path);
+FRESULT f_rename(const TCHAR* path_old, const TCHAR* path_new);
 FRESULT f_stat(const TCHAR* path, FILINFO* fno);
 FRESULT f_chdir(const TCHAR* path);
 FRESULT f_mount(FATFS* fs, const TCHAR* path, BYTE opt);

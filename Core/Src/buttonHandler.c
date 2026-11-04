@@ -17,6 +17,7 @@
  * gives the automation track back on release. Clicking the encoder while a
  * step is held clears that step's locks. A held step has up to
  * NUM_STEP_LOCKS locks (buttonHandler_prepareStepLock).
+ * Also fixes from OpenElixir-02 by Moritz Waser (see the git history).
  */
 #include <frontPanelParser_ui.h>
 #include "Soundengine/MIDI/MidiMessages.h"
@@ -923,14 +924,16 @@ static void buttonHandler_seqButtonPressed(uint8_t seqButtonPressed)
 			//else
 			//{
 				//reload kit to edit buffer
-				preset_loadDrumsetRam(menu_selectedPresetNr[SAVE_TYPE_KIT],0, 0);
+				preset_loadDrumsetRam(menu_loadedPresetNr[CURRENT_KIT],0, 0);
 				preset_touchTimer(PRESET_KIT_TIMER);
 			//}
 		}
 			break;
 
 		case SEQ_CONFIG: //config
-			buttonHandler_stateMemory.selectButtonMode = SEQ_CONFIG;
+			//(was SEQ_CONFIG, a step button number equal to SELECT_MODE_LAST_STEP_ALL:
+			//the next step press set the length of all tracks)
+			buttonHandler_stateMemory.selectButtonMode = SELECT_MODE_MENU;
 			led_clearAllBlinkLeds();
 			led_setBlinkLed(LED_STEP12,1);
 			menu_switchPage(MENU_MIDI_PAGE);
@@ -1446,12 +1449,9 @@ static void buttonHandler_selectButtonPressed(uint8_t partNr)
 		// if shift is held and a part button is held down, we will enter automation record mode
 		// for that sub-step on the currently selected step.
 		// if shift is not held, we just do normal handling
-		if ( buttonHandler_stateMemory.selectButtonMode == SELECT_MODE_VOICE && buttonHandler_getShift()) {
-			//TODO hier muss selektiert werden!
-			buttonHandler_setTimeraction((uint8_t)(buttonHandler_selectedStep * 8 + partNr));
-		} else {
-			buttonHandler_handleSelectButton(partNr);
-		}
+		//(SHIFT + held select button armed step selectedStep*8+partNr for automation:
+		//the v1 sub step formula, up to 511 -> recorded far past the 64 steps of a track)
+		buttonHandler_handleSelectButton(partNr);
 
 	}
 

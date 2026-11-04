@@ -9,6 +9,9 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * fixes from OpenElixir-02 by Moritz Waser (see the git history).
  */
 
 
@@ -51,11 +54,9 @@ void voiceControl_noteOn(uint8_t voice, uint8_t note, uint8_t vel)
 	}
 	*/
 
-	if (active_voices & (1<<voice))
-	{
-    uint8_t midiChan = midi_MidiChannels[voice];
-		seq_sendMidiNoteOn(midiChan, note, vel);
-	}
+	//MIDI out: the callers send the note (sequencer: seq_triggerVoice, MIDI in:
+	//midiParser_noteOn) after a note off; sending it here too doubled every note
+	//and only the second one got a note off
 
 	// Send to front panel so it can pulse the LED
 	uart_sendFrontpanelByte(NOTE_ON);

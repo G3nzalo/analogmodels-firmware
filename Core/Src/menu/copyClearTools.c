@@ -10,6 +10,9 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * fixes from OpenElixir-02 by Moritz Waser (see the git history).
  */ 
 #include <frontPanelParser_ui.h>
 #include "menu/copyClearTools.h"
@@ -48,7 +51,7 @@ void copyClear_executeClear()
 	{
 		default:
 		case CLEAR_KIT:
-			preset_init(menu_selectedPresetNr[SAVE_TYPE_KIT]);
+			preset_init(menu_loadedPresetNr[CURRENT_KIT]);
 			break;
 		case CLEAR_TRACK:
 			copyClear_clearCurrentTrack();

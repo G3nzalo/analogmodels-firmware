@@ -10,6 +10,9 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * fixes from OpenElixir-02 by Moritz Waser (see the git history).
  */
 
 #include "Soundengine/DSPAudio/FX/Compressor.h"
@@ -177,7 +180,7 @@ void Compressor_process(Compressor *c, int16_t *fxBuffer,int16_t* outL, int16_t*
 			gr = dB2lin(gr);
 			//debugWatch = gr;
 
-			left[i]  = fxBuffer[idx1] * gr * c->markupGain;//gain;
+			left[i]  = __SSAT(fxBuffer[idx1] * gr * c->markupGain, 16);//gain; (saturate like the stereo path, it wrapped)
 
 
 			//--- Output transfer ---
