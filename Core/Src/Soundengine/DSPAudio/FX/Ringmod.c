@@ -10,6 +10,9 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * the ring mod keeps to the six original waveforms.
  */
 
 
@@ -83,7 +86,8 @@ void Ringmod_setFreq(Ringmod *rm, float f)
 }
 void Ringmod_setWave(Ringmod *rm, uint8_t w)
 {
-	rm->osc.waveform = w;
+	//the 808/909 instruments need a trigger, so the ring mod only uses the original waveforms
+	rm->osc.waveform = (w < NUM_OSC_WAVEFORMS) ? w : SINE;
 }
 
 void Ringmod_resetPhase(Ringmod* rm)

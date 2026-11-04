@@ -9,6 +9,11 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * seq_clearStepLocks() clears the parameter locks of a single step, and a
+ * step plays up to NUM_STEP_LOCKS parameter locks: lock 1 and 2 in its Step,
+ * the others from the lock pool of the pattern (seq_lockPool).
  */
 
 
@@ -153,8 +158,11 @@ uint8_t *seq_activeSong;
 uint8_t seq_songPositionPointer = 0;	//for song playback, current song position
 //uint8_t seq_bankPreloadPendingFlag = NO_PRELOAD_PENDING;
 
-//for the automation tracks each track needs 2 modNodes
-static AutomationNode seq_automationNodes[NUM_TRACKS][2];
+//for the parameter locks each track needs a modNode per lock of a step
+static AutomationNode seq_automationNodes[NUM_TRACKS][NUM_STEP_LOCKS];
+
+//the extra parameter locks (lock 3 and up) of each pattern
+static LockPool seq_lockPool[NUM_PATTERN];
 
 static void seq_sendMidi(MidiMsg msg);
 static void seq_sendRealtime(const uint8_t status);
@@ -189,8 +197,8 @@ void seq_init()
 	seq_songData[0][0] = 0;
 
 	for(i=0;i<NUM_TRACKS;i++) {
-		autoNode_init(&seq_automationNodes[i][0]);
-		autoNode_init(&seq_automationNodes[i][1]);
+		for(uint8_t k=0;k<NUM_STEP_LOCKS;k++)
+			autoNode_init(&seq_automationNodes[i][k]);
 
 		seq_stepToSkip[i] = -1;
 	}
@@ -237,6 +245,10 @@ void seq_copyPatternToBackupBuffer(uint8_t patternNr)
 	patternBackupBuffer.shuffle = seq_patternSet.shuffle[patternNr];;
 	patternBackupBuffer.kitNr = seq_patternSet.kitNr[patternNr];
 
+	//the extra parameter locks
+	const LockPool* pool = seq_getLockPool(patternNr);
+	patternBackupBuffer.lockPool.count = pool->count;
+	memcpy(patternBackupBuffer.lockPool.lock, pool->lock, pool->count * sizeof(ExtraLock));
 }
 //------------------------------------------------------------------------------
 void seq_copyBackupBufferToPattern(uint8_t patternNr)
@@ -251,6 +263,15 @@ void seq_copyBackupBufferToPattern(uint8_t patternNr)
 
 	seq_patternSet.shuffle[patternNr] = patternBackupBuffer.shuffle;
 	seq_patternSet.kitNr[patternNr] = patternBackupBuffer.kitNr;
+
+	//the extra parameter locks
+	LockPool* pool = seq_getLockPool(patternNr);
+	const uint8_t count = patternBackupBuffer.lockPool.count <= LOCK_POOL_SIZE ? patternBackupBuffer.lockPool.count : LOCK_POOL_SIZE;
+	pool->count = 0;
+	__asm volatile ("" ::: "memory");
+	memcpy(pool->lock, patternBackupBuffer.lockPool.lock, count * sizeof(ExtraLock));
+	__asm volatile ("" ::: "memory");
+	pool->count = count;
 }
 /*
 //------------------------------------------------------------------------------
@@ -479,14 +500,18 @@ static void seq_sendMidi(MidiMsg msg)
 
 
 //------------------------------------------------------------------------------
-static void seq_parseAutomationNodes(uint8_t track, Step* stepData)
+static void seq_parseAutomationNodes(uint8_t track, uint8_t pattern, uint8_t stepNr)
 {
-	//set new destination
-	autoNode_setDestination(&seq_automationNodes[track][0], stepData->param1Nr);
-	autoNode_setDestination(&seq_automationNodes[track][1], stepData->param2Nr);
-	//set new mod value
-	autoNode_updateValue(&seq_automationNodes[track][0], stepData->param1Val);
-	autoNode_updateValue(&seq_automationNodes[track][1], stepData->param2Val);
+	//the step's locks: lock 1 and 2 and its extra locks from the pattern's pool
+	uint8_t nr[NUM_STEP_LOCKS], val[NUM_STEP_LOCKS];
+	const uint8_t n = seq_getStepLocks(pattern, track, stepNr, nr, val);
+	AutomationNode* nodes = seq_automationNodes[track];
+	//set new destinations first, this puts back the parameters the last step locked
+	for(uint8_t k=0;k<NUM_STEP_LOCKS;k++)
+		autoNode_setDestination(&nodes[k], (k < n) ? nr[k] : NO_AUTOMATION);
+	//set new mod values
+	for(uint8_t k=0;k<n;k++)
+		autoNode_updateValue(&nodes[k], val[k]);
 }
 //------------------------------------------------------------------------------
 void seq_triggerVoice(uint8_t voiceNr, uint8_t vol, uint8_t note)
@@ -497,11 +522,7 @@ void seq_triggerVoice(uint8_t voiceNr, uint8_t vol, uint8_t note)
 	if(voiceNr > 6) return;
 
 
-#if USE_PATTERN_EDIT_BUFFER
-	seq_parseAutomationNodes(voiceNr, &patternBackupBuffer.seq_subStepPattern[voiceNr][seq_stepIndex[voiceNr]]);
-#else
-	seq_parseAutomationNodes(voiceNr, &seq_patternSet.seq_subStepPattern[seq_activePattern][voiceNr][seq_stepIndex[voiceNr]]);
-#endif
+	seq_parseAutomationNodes(voiceNr, seq_activePattern, (uint8_t)seq_stepIndex[voiceNr]);
 
 	//turn the trigger off before sending the next one
 	/*
@@ -2317,9 +2338,14 @@ void seq_recordAutomation(uint8_t voice, uint8_t dest, uint8_t value)
 		if( seq_intIsMainStepActive(voice,quantizedStep/8,seq_activePattern) &&
 				seq_intIsStepActive(voice,quantizedStep,seq_activePattern))
 			*/
-		if( seq_intIsMainStepActive(voice,step,seq_activePattern) )
+		if( (step < NUM_STEPS) && seq_intIsMainStepActive(voice,step,seq_activePattern) )
 		{
-      if(seq_activeAutomTrack == 0) {
+      // a parameter keeps the lock it has on the step, a new one takes a free
+      // lock. When all locks of the step are used it replaces the lock of the
+      // selected automation track, as it always did.
+      if(seq_setStepLock(seq_activePattern, voice, step, dest, value)) {
+        // done
+      } else if(seq_activeAutomTrack == 0) {
         seq_patternSet.seq_subStepPattern[seq_activePattern][voice][step].param1Nr = dest;
         seq_patternSet.seq_subStepPattern[seq_activePattern][voice][step].param1Val = value;
       } else {
@@ -2336,8 +2362,13 @@ void seq_recordAutomation(uint8_t voice, uint8_t dest, uint8_t value)
 	if( (seq_armedArmedAutomationStep	!= -1) && (seq_armedArmedAutomationTrack != -1) )
 	{
 		//step button is held down
-		//-> set step automation parameters
-		if(seq_activeAutomTrack == 0) {
+		//-> set step automation parameters. A parameter keeps its lock, a new
+		//one takes a free lock (the menu makes room when the step is full, see
+		//buttonHandler_prepareStepLock), else the selected automation track
+		if(seq_setStepLock(seq_activePattern, (uint8_t)seq_armedArmedAutomationTrack,
+				(uint8_t)seq_armedArmedAutomationStep, dest, value)) {
+			// done
+		} else if(seq_activeAutomTrack == 0) {
 			seq_patternSet.seq_subStepPattern[seq_activePattern]
 			                                  [seq_armedArmedAutomationTrack]
 			                                   [seq_armedArmedAutomationStep].param1Nr = dest;
@@ -2552,6 +2583,9 @@ void seq_clearTrack(uint8_t trackNr, uint8_t pattern)
 	// all main steps off for this track
 	for(uint8_t i=0;i<NUM_BARS;i++)	seq_patternSet.seq_mainSteps[i][pattern][trackNr] = 0;
 
+	// and no extra parameter locks
+	seq_removeExtraLocks(pattern, trackNr, 0xff);
+
 	//**PATROT all pattern rotations off and all patterns set to length 16
 	seq_patternSet.length[pattern][trackNr]=16;
 
@@ -2582,6 +2616,270 @@ void seq_clearAutomation(uint8_t trackNr, uint8_t pattern, uint8_t automTrack)
 			seq_patternSet.seq_subStepPattern[pattern][trackNr][k].param2Nr		= NO_AUTOMATION;
 			seq_patternSet.seq_subStepPattern[pattern][trackNr][k].param2Val	= 0;
 		}
+		// automation track 2 also takes the extra locks (lock 3 and up) along
+		seq_removeExtraLocks(pattern, trackNr, 0xff);
+	}
+}
+//------------------------------------------------------------------------------
+void seq_clearStepLocks(uint8_t trackNr, uint8_t pattern, uint8_t step)
+{
+	if((trackNr >= NUM_TRACKS) || (pattern >= NUM_PATTERN) || (step >= NUM_STEPS))
+		return;
+	Step* s = &seq_patternSet.seq_subStepPattern[pattern][trackNr][step];
+	s->param1Nr		= NO_AUTOMATION;
+	s->param1Val	= 0;
+	s->param2Nr		= NO_AUTOMATION;
+	s->param2Val	= 0;
+	seq_removeExtraLocks(pattern, trackNr, step);
+}
+//------------------------------------------------------------------------------
+// parameter locks of a step: lock 1 and 2 in its Step, the extra ones in the
+// lock pool of the pattern. The sequencer reads the pools in the audio
+// interrupt while the menu changes them: an entry is complete before the
+// count includes it, and a removed entry is replaced by the last one before
+// the count shrinks, so the interrupt never sees half an entry.
+//------------------------------------------------------------------------------
+#define SEQ_BARRIER()	__asm volatile ("" ::: "memory")
+
+static uint8_t seq_isLock(const uint8_t nr)
+{
+	return (nr != NO_AUTOMATION) && (nr != 0);
+}
+
+static uint8_t seq_isValidStep(const uint8_t pattern, const uint8_t track, const uint8_t step)
+{
+	return (pattern < NUM_PATTERN) && (track < NUM_TRACKS) && (step < NUM_STEPS);
+}
+
+LockPool* seq_getLockPool(uint8_t pattern)
+{
+	return &seq_lockPool[pattern < NUM_PATTERN ? pattern : 0];
+}
+
+// index of the extra lock of parameter nr on a step, -1 if it has none
+static int16_t seq_findExtraLock(const LockPool* p, const uint8_t track, const uint8_t step, const uint8_t nr)
+{
+	for(uint8_t i=0; (i < p->count) && (i < LOCK_POOL_SIZE); i++)
+	{
+		const ExtraLock* e = &p->lock[i];
+		if((e->track == track) && (e->step == step) && (e->nr == nr))
+			return i;
+	}
+	return -1;
+}
+
+static uint8_t seq_numExtraLocks(const LockPool* p, const uint8_t track, const uint8_t step)
+{
+	uint8_t n = 0;
+	for(uint8_t i=0; (i < p->count) && (i < LOCK_POOL_SIZE); i++)
+		if((p->lock[i].track == track) && (p->lock[i].step == step))
+			n++;
+	return n;
+}
+
+// removes entry i of a pool, the last entry takes its place
+static void seq_removeExtraLockAt(LockPool* p, const uint8_t i)
+{
+	p->lock[i] = p->lock[p->count - 1];
+	SEQ_BARRIER();
+	p->count--;
+}
+
+static uint8_t seq_addExtraLock(LockPool* p, const uint8_t track, const uint8_t step, const uint8_t nr, const uint8_t val)
+{
+	if(p->count >= LOCK_POOL_SIZE)
+		return 0;
+	ExtraLock* e = &p->lock[p->count];
+	e->track	= track;
+	e->step		= step;
+	e->nr		= nr;
+	e->val		= val;
+	SEQ_BARRIER();
+	p->count++;
+	return 1;
+}
+//------------------------------------------------------------------------------
+uint8_t seq_getStepLocks(uint8_t pattern, uint8_t track, uint8_t step, uint8_t* nr, uint8_t* val)
+{
+	if(!seq_isValidStep(pattern, track, step))
+		return 0;
+	uint8_t n = 0;
+	const Step* s = &seq_patternSet.seq_subStepPattern[pattern][track][step];
+	if(seq_isLock(s->param1Nr))
+	{
+		nr[n]	= s->param1Nr;
+		val[n++]	= s->param1Val;
+	}
+	if(seq_isLock(s->param2Nr) && (s->param2Nr != s->param1Nr))
+	{
+		nr[n]	= s->param2Nr;
+		val[n++]	= s->param2Val;
+	}
+	const LockPool* p = &seq_lockPool[pattern];
+	const uint8_t count = p->count;	// read once, the menu can change the pool meanwhile
+	for(uint8_t i=0; (i < count) && (i < LOCK_POOL_SIZE) && (n < NUM_STEP_LOCKS); i++)
+	{
+		const ExtraLock* e = &p->lock[i];
+		if((e->track != track) || (e->step != step) || !seq_isLock(e->nr))
+			continue;
+		// one lock per parameter
+		uint8_t k = 0;
+		while((k < n) && (nr[k] != e->nr))
+			k++;
+		if(k == n)
+		{
+			nr[n]	= e->nr;
+			val[n++]	= e->val;
+		}
+	}
+	return n;
+}
+//------------------------------------------------------------------------------
+uint8_t seq_stepHasFreeLock(uint8_t pattern, uint8_t track, uint8_t step)
+{
+	if(!seq_isValidStep(pattern, track, step))
+		return 0;
+	const Step* s = &seq_patternSet.seq_subStepPattern[pattern][track][step];
+	if(!seq_isLock(s->param1Nr) || !seq_isLock(s->param2Nr))
+		return 1;
+	const LockPool* p = &seq_lockPool[pattern];
+	return (p->count < LOCK_POOL_SIZE) && (seq_numExtraLocks(p, track, step) < NUM_STEP_LOCKS - 2);
+}
+//------------------------------------------------------------------------------
+uint8_t seq_setStepLock(uint8_t pattern, uint8_t track, uint8_t step, uint8_t nr, uint8_t val)
+{
+	if(!seq_isValidStep(pattern, track, step) || !seq_isLock(nr))
+		return 0;
+	Step* s = &seq_patternSet.seq_subStepPattern[pattern][track][step];
+	LockPool* p = &seq_lockPool[pattern];
+	// the parameter's own lock
+	if(s->param1Nr == nr)
+	{
+		s->param1Val = val;
+		return 1;
+	}
+	if(s->param2Nr == nr)
+	{
+		s->param2Val = val;
+		return 1;
+	}
+	const int16_t i = seq_findExtraLock(p, track, step, nr);
+	if(i >= 0)
+	{
+		p->lock[i].val = val;
+		return 1;
+	}
+	// a free lock: 1 and 2 first, then one from the pool
+	if(!seq_isLock(s->param1Nr))
+	{
+		s->param1Val = val;
+		SEQ_BARRIER();
+		s->param1Nr = nr;
+		return 1;
+	}
+	if(!seq_isLock(s->param2Nr))
+	{
+		s->param2Val = val;
+		SEQ_BARRIER();
+		s->param2Nr = nr;
+		return 1;
+	}
+	if(seq_numExtraLocks(p, track, step) >= NUM_STEP_LOCKS - 2)
+		return 0;
+	return seq_addExtraLock(p, track, step, nr, val);
+}
+//------------------------------------------------------------------------------
+void seq_removeStepLock(uint8_t pattern, uint8_t track, uint8_t step, uint8_t nr)
+{
+	if(!seq_isValidStep(pattern, track, step) || !seq_isLock(nr))
+		return;
+	Step* s = &seq_patternSet.seq_subStepPattern[pattern][track][step];
+	if(s->param1Nr == nr)
+	{
+		s->param1Nr		= NO_AUTOMATION;
+		s->param1Val	= 0;
+	}
+	if(s->param2Nr == nr)
+	{
+		s->param2Nr		= NO_AUTOMATION;
+		s->param2Val	= 0;
+	}
+	LockPool* p = &seq_lockPool[pattern];
+	int16_t i;
+	while((i = seq_findExtraLock(p, track, step, nr)) >= 0)
+		seq_removeExtraLockAt(p, (uint8_t)i);
+}
+//------------------------------------------------------------------------------
+void seq_removeExtraLocks(uint8_t pattern, uint8_t track, uint8_t step)
+{
+	if(pattern >= NUM_PATTERN)
+		return;
+	LockPool* p = &seq_lockPool[pattern];
+	uint8_t i = 0;
+	while(i < p->count)
+	{
+		const ExtraLock* e = &p->lock[i];
+		if(((track == 0xff) || (e->track == track)) && ((step == 0xff) || (e->step == step)))
+			seq_removeExtraLockAt(p, i);	// the last entry is at i now, check it next
+		else
+			i++;
+	}
+}
+//------------------------------------------------------------------------------
+void seq_copyExtraLocks(uint8_t srcPattern, uint8_t srcTrack, uint8_t srcStep,
+		uint8_t dstPattern, uint8_t dstTrack, uint8_t dstStep)
+{
+	if(!seq_isValidStep(srcPattern, srcTrack, srcStep) || !seq_isValidStep(dstPattern, dstTrack, dstStep))
+		return;
+	if((srcPattern == dstPattern) && (srcTrack == dstTrack) && (srcStep == dstStep))
+		return;
+	seq_removeExtraLocks(dstPattern, dstTrack, dstStep);
+	const LockPool* src = &seq_lockPool[srcPattern];
+	LockPool* dst = &seq_lockPool[dstPattern];
+	const uint8_t n = src->count;
+	for(uint8_t i=0; i<n; i++)
+	{
+		const ExtraLock e = src->lock[i];
+		if((e.track == srcTrack) && (e.step == srcStep))
+			seq_addExtraLock(dst, dstTrack, dstStep, e.nr, e.val);
+	}
+}
+//------------------------------------------------------------------------------
+void seq_checkLockPool(uint8_t pattern)
+{
+	if(pattern >= NUM_PATTERN)
+		return;
+	LockPool* p = &seq_lockPool[pattern];
+	if(p->count > LOCK_POOL_SIZE)
+		p->count = LOCK_POOL_SIZE;
+	uint8_t i = 0;
+	while(i < p->count)
+	{
+		const ExtraLock* e = &p->lock[i];
+		uint8_t keep = (e->track < NUM_TRACKS) && (e->step < NUM_STEPS) && seq_isLock(e->nr);
+		if(keep)
+		{
+			// not a parameter the step locks already, and room on the step
+			// (the entries before i are checked)
+			const Step* s = &seq_patternSet.seq_subStepPattern[pattern][e->track][e->step];
+			uint8_t n = 0;
+			for(uint8_t k=0; k<i; k++)
+			{
+				const ExtraLock* o = &p->lock[k];
+				if((o->track == e->track) && (o->step == e->step))
+				{
+					n++;
+					if(o->nr == e->nr)
+						keep = 0;
+				}
+			}
+			if((e->nr == s->param1Nr) || (e->nr == s->param2Nr) || (n >= NUM_STEP_LOCKS - 2))
+				keep = 0;
+		}
+		if(keep)
+			i++;
+		else
+			seq_removeExtraLockAt(p, i);
 	}
 }
 //------------------------------------------------------------------------------
@@ -2608,6 +2906,20 @@ void seq_copyTrack(uint8_t srcNr, uint8_t dstNr, uint8_t pattern)
 
 	// copy which main steps are on/off
 	for(uint8_t i=0;i<NUM_BARS;i++)	seq_patternSet.seq_mainSteps[i][pattern][dstNr] = seq_patternSet.seq_mainSteps[i][pattern][srcNr];
+
+	// and the extra parameter locks
+	if((srcNr != dstNr) && (srcNr < NUM_TRACKS) && (dstNr < NUM_TRACKS))
+	{
+		seq_removeExtraLocks(pattern, dstNr, 0xff);
+		LockPool* pool = seq_getLockPool(pattern);
+		const uint8_t n = pool->count;
+		for(uint8_t i=0; i<n; i++)
+		{
+			const ExtraLock e = pool->lock[i];
+			if(e.track == srcNr)
+				seq_addExtraLock(pool, dstNr, e.step, e.nr, e.val);
+		}
+	}
 
 	// copy length and rotation offset from source track
 	seq_patternSet.length[pattern][dstNr] = seq_patternSet.length[pattern][srcNr];
@@ -2646,6 +2958,18 @@ void seq_copyPattern(uint8_t src, uint8_t dst)
 
 		seq_patternSet.shuffle[dst] = seq_patternSet.shuffle[src];
 		seq_patternSet.kitNr[dst] = seq_patternSet.kitNr[src];
+	}
+
+	// the extra parameter locks
+	if((src != dst) && (src < NUM_PATTERN) && (dst < NUM_PATTERN))
+	{
+		LockPool* d = seq_getLockPool(dst);
+		const LockPool* s = seq_getLockPool(src);
+		d->count = 0;
+		SEQ_BARRIER();
+		memcpy(d->lock, s->lock, s->count * sizeof(ExtraLock));
+		SEQ_BARRIER();
+		d->count = s->count;
 	}
 }
 //------------------------------------------------------------------------------

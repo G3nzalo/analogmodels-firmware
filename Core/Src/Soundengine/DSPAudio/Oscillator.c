@@ -9,10 +9,14 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * waveforms after PWM run the 808/909 instruments (AnalogModels.c).
  */
 
 
 #include "Soundengine/DSPAudio/Oscillator.h"
+#include "Soundengine/DSPAudio/AnalogModels.h"
 #include "Soundengine/DSPAudio/random.h"
 #include "Soundengine/DSPAudio/Samples.h"
 #include "Soundengine/MIDI/MidiParser.h"
@@ -277,7 +281,8 @@ IN_ITCM_RAM void calcNextOscSampleFmBlock(OscInfo* osc, int16_t* modBuffer, int1
 			break;
 
 		default:
-			calcUserSampleOscFmBlock(osc,modBuffer,buf,size,gain);
+			//808/909 instruments ignore the FM input, anything else is silent
+			model_calcBlock(osc,buf,size,gain,pwm);
 			break;
 
 		}
@@ -400,10 +405,9 @@ IN_ITCM_RAM void calcNextOscSampleBlock(OscInfo* osc, int16_t* buf, const uint8_
 			calcPwmBlock(osc,buf,size, gain, pwm);
 			break;
 
-		default://sample playback
-		//	if( osc->waveform - OSC_SAMPLE_START > sampleMemory_getNumSamples() ) return; // return if out of range
-
-		//	calcUserSampleOscBlock(osc,buf,size, gain);
+		default:
+			//808/909 instruments, anything else (the old sample slots) is silent
+			model_calcBlock(osc,buf,size,gain,pwm);
 			break;
 		}
 }
@@ -779,9 +783,12 @@ void osc_calcUserSampleFreq(OscInfo* osc)
 			osc_calcWavetableFreq(osc);
 			break;
 
-		//samples
+		//808/909 instruments use a full 32 bit phase per cycle, like the sine
 		default:
-			osc_calcUserSampleFreq(osc);
+			if(osc_isModel(osc->waveform))
+				osc_calcSineFreq(osc);
+			else
+				osc_calcUserSampleFreq(osc);
 			break;
 
 		}

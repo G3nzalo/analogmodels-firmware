@@ -10,8 +10,16 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * holding a step shows the locks of the voice being edited, finds the right
+ * parameter for locks above parameter 127, starts with empty lock buffers and
+ * gives the automation track back on release. Clicking the encoder while a
+ * step is held clears that step's locks. A held step has up to
+ * NUM_STEP_LOCKS locks (buttonHandler_prepareStepLock).
  */
 #include <frontPanelParser_ui.h>
+#include "Soundengine/MIDI/MidiMessages.h"
 #include "buttonHandler.h"
 #include "menu/menu.h"
 #include "ledHandler.h"
@@ -39,11 +47,14 @@ static uint32_t buttonHandler_buttonTimer = 0;
 
 #define TIMER_ACTION_OCCURED -2
 static int8_t buttonHandler_buttonTimerStepNr = NO_STEP_SELECTED;
-volatile uint16_t buttonHandler_originalParameter[2];//saves parameter number for step automation reset (stgep assign)
-uint8_t buttonHandler_originalValue[2];//saves the parameter value for reset
-uint8_t buttonHandler_resetLock1 = 0;
-uint8_t buttonHandler_resetLock2 = 0;
-// uint8_t buttonHandler_resetLock[NUM_AUTOMATION_PAR];
+// the locks of the held step: the locked parameters and the values they had
+// before the step was held, shown again on release. One entry per lock of the
+// step (there used to be two).
+static uint16_t buttonHandler_originalParameter[NUM_STEP_LOCKS];//saves parameter number for step automation reset (stgep assign)
+static uint8_t buttonHandler_originalValue[NUM_STEP_LOCKS];//saves the parameter value for reset
+static uint8_t buttonHandler_resetLock[NUM_STEP_LOCKS];
+// the lock a new parameter replaces when all locks of the step are used
+static uint8_t buttonHandler_nextReplacedLock = 0;
 
 volatile struct {
 	unsigned selectButtonMode :4; // 0-3 for unshifted, 4-7 for shifted + extra modes (like pattern select)
@@ -55,6 +66,36 @@ volatile struct {
 
 static uint8_t buttonHandler_mutedVoices = 0;
 volatile static int8_t buttonHandler_armedAutomationStep = NO_STEP_SELECTED;
+// realtime-record automation track before a step was held (holding a step switches it)
+static uint8_t buttonHandler_savedAutomTrack = 0;
+
+// A step lock stores the parameter like a CC number: parameter+1 below 128,
+// the parameter number itself from 128 on (see seq_recordAutomation and
+// autoNode_updateValue). 0 and NO_AUTOMATION mean "no lock".
+static uint8_t buttonHandler_lockedParam(const uint8_t lockNr, uint8_t* parNr)
+{
+	if((lockNr == NO_AUTOMATION) || (lockNr == 0)) return 0;
+	*parNr = (lockNr >= 128) ? lockNr : (uint8_t)(lockNr - 1);
+	return *parNr < END_OF_SOUND_PARAMETERS;
+}
+// the other way round: how a lock stores a parameter
+static uint8_t buttonHandler_lockCode(const uint16_t parNr)
+{
+	return (uint8_t)((parNr < 128) ? parNr + 1 : parNr);
+}
+// gives the sound engine the value a locked parameter had before the step was held
+static void buttonHandler_sendOriginalValue(const uint8_t k)
+{
+	const uint16_t par = buttonHandler_originalParameter[k];
+	if (par == 0)
+		return;
+	if (par < 128) // => Sound Parameter
+		frontPanel_sendData(MIDI_CC, (uint8_t) par, buttonHandler_originalValue[k]);
+	else if (par < END_OF_SOUND_PARAMETERS) // => Sound Parameter above 127
+		frontPanel_sendData(CC_2, (uint8_t) (par - 128), buttonHandler_originalValue[k]);
+	else
+		menu_parseGlobalParam(par, activeParameters[par]);
+}
 
 #define ARM_AUTOMATION		0x40
 #define DISARM_AUTOMATION	0x00
@@ -103,27 +144,30 @@ static void buttonHandler_armTimerActionStep(int8_t stepNr) {
 
   /////////////////////
 
-  PatternSet* patSet = get_seq_patternSet_p();
-  uint8_t parNr = patSet->seq_subStepPattern[seq_activePattern][0][stepNr].param1Nr - 1;
-
-  if (parNr != 254)
+  // the lock buffers mirror the locks of the held step, so start empty
+  // (they used to keep the parameters of the previously held step, which made
+  // new locks overwrite each other)
+  for (uint8_t k = 0; k < NUM_STEP_LOCKS; k++)
   {
-    buttonHandler_originalValue[0] = activeParameters[parNr];
-    activeParameters[parNr] = patSet->seq_subStepPattern[seq_activePattern][0][stepNr].param1Val;
-
-    buttonHandler_originalParameter[0] = parNr;
-    buttonHandler_resetLock1 = 1;
+    buttonHandler_originalParameter[k] = 0;
+    buttonHandler_resetLock[k] = 0;
   }
-
-  parNr = patSet->seq_subStepPattern[seq_activePattern][0][stepNr].param2Nr - 1;
-
-  if (parNr != 254)
+  buttonHandler_nextReplacedLock = 0;
+  buttonHandler_savedAutomTrack = seq_getActiveAutomationTrack();
+  // the locks of the voice being edited (this used to always read track 1),
+  // shown on the display while the step is held
+  uint8_t lockNr[NUM_STEP_LOCKS], lockVal[NUM_STEP_LOCKS];
+  const uint8_t numLocks = seq_getStepLocks(seq_activePattern, menu_getActiveVoice(), (uint8_t)stepNr, lockNr, lockVal);
+  for (uint8_t k = 0; k < numLocks; k++)
   {
-    buttonHandler_originalValue[1] = activeParameters[parNr];
-    activeParameters[parNr] = patSet->seq_subStepPattern[seq_activePattern][0][stepNr].param2Val;
-  
-    buttonHandler_originalParameter[1] = parNr;
-    buttonHandler_resetLock2 = 1;
+    uint8_t parNr;
+    if (buttonHandler_lockedParam(lockNr[k], &parNr))
+    {
+      buttonHandler_originalValue[k] = activeParameters[parNr];
+      activeParameters[parNr] = lockVal[k];
+      buttonHandler_originalParameter[k] = parNr;
+      buttonHandler_resetLock[k] = 1;
+    }
   }
   ///////////////
 
@@ -152,107 +196,27 @@ static void buttonHandler_disarmTimerActionStep() {
     ///////
 		//revert to original sound
 		//make changes temporary while an automation step is armed - revert to original value
-		if (buttonHandler_resetLock1 == 1) {
-			activeParameters[buttonHandler_originalParameter[0]] =
-					buttonHandler_originalValue[0];
-      // memcpy(activeParameters, buttonHandler_originalValue, NUM_PARAMS);
-		}
-    if (buttonHandler_resetLock2 == 1) {
-      activeParameters[buttonHandler_originalParameter[1]] =
-          buttonHandler_originalValue[1];
-      // memcpy(activeParameters, buttonHandler_originalValue, NUM_PARAMS);
-		}
-    /////////
+		for (uint8_t k = 0; k < NUM_STEP_LOCKS; k++)
+			if (buttonHandler_resetLock[k] == 1)
+				activeParameters[buttonHandler_originalParameter[k]] = buttonHandler_originalValue[k];
 
 		buttonHandler_armedAutomationStep = NO_STEP_SELECTED;
 		frontPanel_sendData(ARM_AUTOMATION_STEP, 0, DISARM_AUTOMATION);
+		// holding the step switched the automation track, give the old one back
+		seq_setActiveAutomationTrack(buttonHandler_savedAutomTrack);
 
-    /////////
-    // for (int i = 0; i < NUM_AUTOMATION_PAR; i++)
-    // {
-    //   if (buttonHandler_resetLock[i] == 1)
-    //   {
-    //     buttonHandler_resetLock[i] = 0;
-
-    //     if (buttonHandler_originalParameter[i] != 0)
-    //     {
-    //       //&revert to original value
-    //       if (buttonHandler_originalParameter[i] < 128) // => Sound Parameter
-    //       {
-    //         frontPanel_sendData(MIDI_CC,
-    //             (uint8_t) (buttonHandler_originalParameter[i]),
-    //             buttonHandler_originalValue[i]);
-    //       } 
-    //       else if (buttonHandler_originalParameter[i] >= 128 && (buttonHandler_originalParameter[i] < END_OF_SOUND_PARAMETERS)) // => Sound Parameter above 127
-    //       {
-    //         frontPanel_sendData(CC_2,
-    //         (uint8_t) (buttonHandler_originalParameter[i] - 128),
-    //         buttonHandler_originalValue[i]);
-    //       } 
-    //       else
-    //       {
-    //         menu_parseGlobalParam(buttonHandler_originalParameter[i],
-    //         activeParameters[buttonHandler_originalParameter[i]]);
-    //       }
-    //       menu_repaintAll();
-    //     }
-    //   }
-    // }
-
-    /////////
-    if (buttonHandler_resetLock1 == 1)
-    {
-      buttonHandler_resetLock1 = 0;
-
-      if (buttonHandler_originalParameter[0] != 0)
-      {
-        //&revert to original value
-        if (buttonHandler_originalParameter[0] < 128) // => Sound Parameter
-        {
-          frontPanel_sendData(MIDI_CC,
-              (uint8_t) (buttonHandler_originalParameter[0]),
-              buttonHandler_originalValue[0]);
-        } 
-        else if (buttonHandler_originalParameter[0] >= 128 && (buttonHandler_originalParameter[0] < END_OF_SOUND_PARAMETERS)) // => Sound Parameter above 127
-        {
-          frontPanel_sendData(CC_2,
-          (uint8_t) (buttonHandler_originalParameter[0] - 128),
-          buttonHandler_originalValue[0]);
-        } 
-        else
-        {
-          menu_parseGlobalParam(buttonHandler_originalParameter[0],
-          activeParameters[buttonHandler_originalParameter[0]]);
-        }
-        menu_repaintAll();
-      }
-    }
-
-    if (buttonHandler_resetLock2 == 1)
-    {
-      buttonHandler_resetLock2 = 0;
-
-      if (buttonHandler_originalParameter[1] != 0)
-      {
-        if (buttonHandler_originalParameter[1] < 128) // => Sound Parameter
-        {
-          frontPanel_sendData(MIDI_CC,
-          (uint8_t) (buttonHandler_originalParameter[1]),
-          buttonHandler_originalValue[1]);
-        }
-        else if (buttonHandler_originalParameter[1] >= 128 && (buttonHandler_originalParameter[1] < END_OF_SOUND_PARAMETERS)) // => Sound Parameter above 127
-        {
-          frontPanel_sendData(CC_2,
-          (uint8_t) (buttonHandler_originalParameter[1] - 128),
-          buttonHandler_originalValue[1]);
-        }
-        else
-        {
-          menu_parseGlobalParam(buttonHandler_originalParameter[1],
-          activeParameters[buttonHandler_originalParameter[1]]);
-        }
-        menu_repaintAll();
-      }
+		//&revert to original value
+		for (uint8_t k = 0; k < NUM_STEP_LOCKS; k++)
+		{
+			if (buttonHandler_resetLock[k] == 1)
+			{
+				buttonHandler_resetLock[k] = 0;
+				if (buttonHandler_originalParameter[k] != 0)
+				{
+					buttonHandler_sendOriginalValue(k);
+					menu_repaintAll();
+				}
+			}
 		}
 		return;
 	}
@@ -267,6 +231,74 @@ static void buttonHandler_disarmTimerActionStep() {
 //--------------------------------------------------------
 int8_t buttonHandler_getArmedAutomationStep() {
 	return buttonHandler_armedAutomationStep;
+}
+//--------------------------------------------------------
+// clears all locks of the held step, the shown values go back to the sound
+void buttonHandler_clearArmedStepLocks() {
+	if (buttonHandler_armedAutomationStep == NO_STEP_SELECTED)
+		return;
+	for (uint8_t k = 0; k < NUM_STEP_LOCKS; k++)
+	{
+		if (buttonHandler_resetLock[k] == 1)
+			activeParameters[buttonHandler_originalParameter[k]] = buttonHandler_originalValue[k];
+		buttonHandler_originalParameter[k] = 0;
+		buttonHandler_resetLock[k] = 0;
+	}
+	buttonHandler_nextReplacedLock = 0;
+	seq_clearStepLocks(menu_getActiveVoice(), seq_activePattern, (uint8_t)buttonHandler_armedAutomationStep);
+	menu_repaintAll();
+}
+//--------------------------------------------------------
+// A knob changes sound parameter paramNr while a step is held. The sequencer
+// records the lock (seq_recordAutomation); here the step gets room for it and
+// the value the parameter had is kept, to show it again on release. When all
+// locks of the step are used, one of them makes room, in turn.
+void buttonHandler_prepareStepLock(uint16_t paramNr) {
+	if ((buttonHandler_armedAutomationStep == NO_STEP_SELECTED) || (paramNr == 0) || (paramNr >= END_OF_SOUND_PARAMETERS))
+		return;
+	// a parameter that is locked on the held step keeps its lock
+	for (uint8_t k = 0; k < NUM_STEP_LOCKS; k++)
+		if (buttonHandler_resetLock[k] && (buttonHandler_originalParameter[k] == paramNr))
+			return;
+
+	const uint8_t track = menu_getActiveVoice();
+	const uint8_t step = (uint8_t) buttonHandler_armedAutomationStep;
+	if (!seq_stepHasFreeLock(seq_activePattern, track, step))
+	{
+		// replace the next lock in turn: the display shows the sound's value of
+		// its parameter again (the sound itself is not changed while a step is held)
+		uint8_t k = buttonHandler_nextReplacedLock;
+		uint8_t tries = 0;
+		while ((buttonHandler_resetLock[k] == 0) && (tries++ < NUM_STEP_LOCKS))
+			k = (uint8_t) ((k + 1) % NUM_STEP_LOCKS);
+		if (buttonHandler_resetLock[k])
+		{
+			buttonHandler_nextReplacedLock = (uint8_t) ((k + 1) % NUM_STEP_LOCKS);
+			activeParameters[buttonHandler_originalParameter[k]] = buttonHandler_originalValue[k];
+			seq_removeStepLock(seq_activePattern, track, step, buttonHandler_lockCode(buttonHandler_originalParameter[k]));
+			buttonHandler_resetLock[k] = 0;
+			buttonHandler_originalParameter[k] = 0;
+			menu_repaintAll();
+		}
+		else
+		{
+			// the step's locks are not in the buffers (they lock no sound parameter): drop lock 1
+			uint8_t nr[NUM_STEP_LOCKS], val[NUM_STEP_LOCKS];
+			if (seq_getStepLocks(seq_activePattern, track, step, nr, val))
+				seq_removeStepLock(seq_activePattern, track, step, nr[0]);
+		}
+	}
+	// remember the value the new parameter has now
+	for (uint8_t k = 0; k < NUM_STEP_LOCKS; k++)
+	{
+		if (buttonHandler_resetLock[k] == 0)
+		{
+			buttonHandler_originalParameter[k] = paramNr;
+			buttonHandler_originalValue[k] = activeParameters[paramNr];
+			buttonHandler_resetLock[k] = 1;
+			break;
+		}
+	}
 }
 ;
 //--------------------------------------------------------
@@ -1635,6 +1667,9 @@ void buttonHandler_buttonPressed(uint8_t buttonNr) {
 						dst->param2Val	= src->param2Val;
 						dst->prob		= src->prob;
 						dst->volume		= src->volume;
+						// and the extra parameter locks
+						seq_copyExtraLocks(seq_activePattern, menu_getActiveVoice(), (uint8_t)(((menu_activeBar-1)*16)+k),
+								seq_activePattern, menu_getActiveVoice(), (uint8_t)((menu_activeBar*16)+k));
 					}
 
 					/*

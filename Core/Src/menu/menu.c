@@ -5,6 +5,14 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * shows the 808/909 instruments in the waveform list, sets up the voice for
+ * an instrument when it is chosen (modelPresets.c) and labels the PWM knob
+ * "sat" (tube saturator) while one runs. A held step locks up to
+ * NUM_STEP_LOCKS parameters (buttonHandler_prepareStepLock), an already locked
+ * parameter keeps its lock, a knob without a parameter does not use up a
+ * lock, and clicking the encoder while a step is held clears that step's locks.
  */
 
 #include "menu/menu.h"
@@ -41,6 +49,10 @@ uint8_t saveScreenPots[4]; //hold absolute pot position for save page name editi
 
 
 #include "Soundengine/DSPAudio/modulationNode.h"
+#include "Soundengine/DSPAudio/AnalogModels.h"
+#include "menu/modelPresets.h"
+
+extern uint8_t seq_recordActive;	// sequencer.c: realtime automation recording is on
 
 // uppercase 3 letters in buf
 static void upr_three(char *buf);
@@ -249,6 +261,7 @@ const Name valueNames[NUM_NAMES] =
 		{SHORT_P3, CAT_FX, LONG_P3},/*TEXT_FX_P3*/
 		{SHORT_P4, CAT_FX, LONG_P4},/*TEXT_FX_P4*/
 		{SHORT_KCM, CAT_GLOBAL, LONG_PATTERN_MODE},/*TEXT_AUTO_SWITCH_KIT*/
+		{SHORT_CHAR, CAT_OSC, LONG_CHAR},/*TEXT_MODEL_CHAR*/
 
 
 };
@@ -503,7 +516,7 @@ const enum Datatypes PROGMEM parameter_dtypes[NUM_PARAMS] = {
 		/*PAR_FX_P3*/			DTYPE_0B127,
 		/*PAR_FX_P4*/			DTYPE_0B127,
 		/*PAR_FX_RATIO*/		DTYPE_MENU | (MENU_RATIO<<8),
-		/*PAR_FX_WAVE*/			DTYPE_MENU | (MENU_WAVEFORM<<8),
+		/*PAR_FX_WAVE*/			DTYPE_MENU | (MENU_FX_WAVEFORM<<8),
 		/*PAR_FX_REVERB_TYPE*/	DTYPE_MENU | (MENU_REVERB<<8),
 		/*PAR_FX_DELAY_TYPE*/	DTYPE_MENU | (MENU_DELAY<<8),
 		/*PAR_MORPH_KIT_DEST*/	DTYPE_0B127,
@@ -1510,6 +1523,63 @@ static void menu_displayModTargetShort(uint8_t curParmVal, char *valueAsText, ch
 }
 
 //-----------------------------------------------------------------
+// The PWM knob is the tube saturator of the 808/909 instruments, so it is
+// labelled "sat" while the voice's oscillator runs one of them.
+static uint8_t menu_textForParam(const uint8_t textId, const uint16_t parNr)
+{
+	if((textId == TEXT_PWM) && (parNr >= PAR_PWM_1) && (parNr <= PAR_PWM_6))
+	{
+		static const uint8_t wavePar[6] = {
+			PAR_OSC_WAVE_DRUM1, PAR_OSC_WAVE_DRUM2, PAR_OSC_WAVE_DRUM3,
+			PAR_OSC_WAVE_SNARE, PAR_WAVE1_CYM, PAR_WAVE1_HH };
+		if(osc_isModel(activeParameters[wavePar[parNr - PAR_PWM_1]]))
+			return TEXT_MODEL_CHAR;
+	}
+	return textId;
+}
+//-----------------------------------------------------------------
+// the parameters a held step can lock: the sound parameters that go to the
+// sound engine as CC (the mod target selections are sent another way)
+static uint8_t menu_isLockableParam(const uint16_t paramNr)
+{
+	if((paramNr == PAR_NONE) || (paramNr >= END_OF_SOUND_PARAMETERS))
+		return 0;
+	switch(parameter_dtypes[paramNr] & 0xFF)
+	{
+	case DTYPE_TARGET_SELECTION_VELO:
+	case DTYPE_VOICE_LFO:
+	case DTYPE_TARGET_SELECTION_LFO:
+		return 0;
+	default:
+		return 1;
+	}
+}
+//-----------------------------------------------------------------
+// sets one sound parameter of an instrument preset like turning its knob
+static void menu_presetSetParam(uint16_t parNr, uint8_t value)
+{
+	activeParameters[parNr] = value;
+	if(parNr < 128)
+		frontPanel_sendData(MIDI_CC, (uint8_t)parNr, value);
+	else if(parNr < END_OF_SOUND_PARAMETERS)
+		frontPanel_sendData(CC_2, (uint8_t)(parNr - 128), value);
+}
+//-----------------------------------------------------------------
+// Choosing an 808/909 instrument as a voice's waveform sets up the rest of
+// the voice for it (see modelPresets.c). Not while a step is held, where
+// the waveform becomes a parameter lock of that step, and not while
+// automation is being recorded.
+static void menu_applyModelPreset(const uint16_t paramNr, const uint8_t value)
+{
+	const uint8_t voice = modelPreset_voiceOfWaveParam(paramNr);
+	if((voice == MODEL_PRESET_NO_VOICE) || !osc_isModel(value))
+		return;
+	if((buttonHandler_getArmedAutomationStep() != NO_STEP_SELECTED) || seq_recordActive)
+		return;
+	modelPreset_apply(voice, value, menu_presetSetParam);
+	menu_repaintAll();
+}
+//-----------------------------------------------------------------
 // paint the screen when in normal parameter edit mode
 // (as opposed to repainting the load save screen)
 void menu_repaintGeneric()
@@ -1525,8 +1595,8 @@ void menu_repaintGeneric()
 	if(editModeActive) //show single parameter with full name
 	{
 		//get address from top1-4 from activeParameter (base adress top1 + offset)
-		uint8_t parName = pgm_read_byte(&ap->top1 + activeParameter);
 		uint16_t parNr = pgm_read_word(&ap->bot1 + activeParameter);
+		uint8_t parName = menu_textForParam(pgm_read_byte(&ap->top1 + activeParameter), parNr);
 
 		curParmVal = activeParameters[parNr];
 
@@ -1671,14 +1741,13 @@ void menu_repaintGeneric()
 		const uint8_t is2ndPage = (activeParameter>3) * 4;
 
 		// top texts
-		memcpy(&editDisplayBuffer[0][0],
-			&shortNames[pgm_read_byte(&valueNames[pgm_read_byte(&ap->top1+is2ndPage)].shortName)],3);
-		memcpy(&editDisplayBuffer[0][4],
-			&shortNames[pgm_read_byte(&valueNames[pgm_read_byte(&ap->top2+is2ndPage)].shortName)],3);
-		memcpy(&editDisplayBuffer[0][8],
-			&shortNames[pgm_read_byte(&valueNames[pgm_read_byte(&ap->top3+is2ndPage)].shortName)],3);
-		memcpy(&editDisplayBuffer[0][12],
-			&shortNames[pgm_read_byte(&valueNames[pgm_read_byte(&ap->top4+is2ndPage)].shortName)],3);
+		for(uint8_t col=0; col<4; col++)
+		{
+			const uint8_t txt = menu_textForParam(pgm_read_byte(&ap->top1+col+is2ndPage),
+												  pgm_read_word(&ap->bot1+col+is2ndPage));
+			memcpy(&editDisplayBuffer[0][col*4],
+				&shortNames[pgm_read_byte(&valueNames[txt].shortName)],3);
+		}
 
 		// capitalize selected item
 		upr_three(&editDisplayBuffer[0][(activeParameter%4)*4]);
@@ -2605,6 +2674,9 @@ static uint8_t getMaxEntriesForMenu(uint8_t menuId)
 	case MENU_STEP_SHIFT:
 			return stepShiftNames[0][0];
 
+	case MENU_FX_WAVEFORM:
+		return fxWaveNames[0][0];
+
 	default:
 		return 0;
 	}
@@ -2713,6 +2785,10 @@ static void getMenuItemNameForValue(const uint8_t menuId, const uint8_t curParmV
 		p=stepShiftNames[curParmVal+1];
 		break;
 
+	case MENU_FX_WAVEFORM:
+		p=fxWaveNames[(curParmVal < fxWaveNames[0][0] ? curParmVal : 0) + 1];
+		break;
+
 
 	default:
 		p=menuText_dash;
@@ -2738,6 +2814,11 @@ void menu_parseEncoder(int8_t inc, uint8_t button)
 			{
 				//execute
 				copyClear_executeClear();
+			}
+			else if (buttonHandler_getArmedAutomationStep() != NO_STEP_SELECTED)
+			{
+				// a step is held: clear its parameter locks
+				buttonHandler_clearArmedStepLocks();
 			}
 			else
 			{
@@ -2845,6 +2926,10 @@ static void menu_encoderChangeParameter(int8_t inc)
 	uint8_t *paramValue;
 
 	paramValue = &activeParameters[paramNr];
+
+	// a held step gets a lock for the parameter, like with the knobs
+	if((buttonHandler_getArmedAutomationStep() != NO_STEP_SELECTED) && menu_isLockableParam(paramNr))
+		buttonHandler_prepareStepLock(paramNr);
 
 	//increase parameter value
 	if(inc>0) //positive increase
@@ -3027,6 +3112,9 @@ static void menu_encoderChangeParameter(int8_t inc)
 		menu_parseGlobalParam(paramNr,activeParameters[paramNr]);
 
 	//frontPanel_sendData(0xb0,paramNr,*paramValue);
+
+	// an 808/909 instrument chosen as waveform brings its voice settings
+	menu_applyModelPreset(paramNr, *paramValue);
 }
 
 //-----------------------------------------------------------------
@@ -3946,13 +4034,16 @@ uint8_t menu_parseKnobValue(uint8_t potNr, int16_t diff)
 
 
 
+	// an empty knob slot must not use up one of the two locks of a held step
+	if((paramNr == PAR_NONE) && (buttonHandler_getArmedAutomationStep() != NO_STEP_SELECTED))
+		return 0;
+
 	//parameter fetch. given the value of the pot, and the parameter number
 	// fetch the actual numeric value that the parameter should be set to
 	uint8_t dtypeValue = limitPotValue(diff, paramNr);//getDtypeValue(potValue,paramNr);
 
 	menu_processSpecialCaseValues(paramNr/*,&dtypeValue*/);
 
-  static uint8_t overwriteBufNr = 0;
 
   ////////////////////////////
 
@@ -4020,98 +4111,13 @@ uint8_t menu_parseKnobValue(uint8_t potNr, int16_t diff)
 
 
   ////////////////////////////
-	// make changes temporary while an automation step is armed - save original value
-	if(buttonHandler_getArmedAutomationStep() != NO_STEP_SELECTED)
+	// make changes temporary while an automation step is armed - save original value.
+	// The held step gets a lock for the parameter: a free one (up to NUM_STEP_LOCKS),
+	// or one of its locks in turn when all are used (buttonHandler_prepareStepLock)
+	if((buttonHandler_getArmedAutomationStep() != NO_STEP_SELECTED) && menu_isLockableParam(paramNr))
 	{
-    if(buttonHandler_originalParameter[0] == 0 && (buttonHandler_resetLock1 == 0)) // Space in buf 1
-    {
-      buttonHandler_originalParameter[0] = paramNr;
-      buttonHandler_originalValue[0] = activeParameters[paramNr];
-      seq_setActiveAutomationTrack(0);
-      buttonHandler_resetLock1 = 1;
-    }
-    else if (buttonHandler_originalParameter[0] == paramNr)
-    {
-      seq_setActiveAutomationTrack(0);
-      buttonHandler_resetLock1 = 1;
-    }
-    else if (buttonHandler_originalParameter[1] == 0 && (buttonHandler_resetLock2 == 0)) // No space in buf 1, but space in buf 2
-    {
-      buttonHandler_originalParameter[1] = paramNr;
-      buttonHandler_originalValue[1] = activeParameters[paramNr];
-      seq_setActiveAutomationTrack(1);
-      buttonHandler_resetLock2 = 1;
-    }
-    else if (buttonHandler_originalParameter[1] == paramNr)
-    {
-      seq_setActiveAutomationTrack(1);
-      buttonHandler_resetLock2 = 1;
-    }
-    else if (buttonHandler_originalParameter[0] != 0 && // New param but both DESTINATION buffers taken
-             buttonHandler_originalParameter[1] != 0)
-    {
-      if (overwriteBufNr == 0)
-      {
-        overwriteBufNr = 1; // Next overwrite on buf 1
-        seq_setActiveAutomationTrack(0);
-        buttonHandler_resetLock1 = 1;
-        seq_clearAutomation(0, seq_activePattern, 0);
-        activeParameters[buttonHandler_originalParameter[0]] = buttonHandler_originalValue[0];
-        if (buttonHandler_originalParameter[0] < 128) // => Sound Parameter
-        {
-          frontPanel_sendData(MIDI_CC,
-              (uint8_t) (buttonHandler_originalParameter[0]),
-              buttonHandler_originalValue[0]);
-        } 
-        else if (buttonHandler_originalParameter[0] >= 128 && (buttonHandler_originalParameter[0] < END_OF_SOUND_PARAMETERS)) // => Sound Parameter above 127
-        {
-          frontPanel_sendData(CC_2,
-          (uint8_t) (buttonHandler_originalParameter[0] - 128),
-          buttonHandler_originalValue[0]);
-        } 
-        else
-        {
-          menu_parseGlobalParam(buttonHandler_originalParameter[0],
-          activeParameters[buttonHandler_originalParameter[0]]);
-        }
-
-        menu_repaintAll();
-
-        buttonHandler_originalParameter[0] = paramNr;
-        buttonHandler_originalValue[0] = activeParameters[paramNr];
-      }
-      else if (overwriteBufNr == 1)
-      {
-        overwriteBufNr = 0; // Next overwrite on buf 1
-        seq_setActiveAutomationTrack(1);
-        buttonHandler_resetLock2 = 1;
-        seq_clearAutomation(1, seq_activePattern, 1);
-        activeParameters[buttonHandler_originalParameter[1]] = buttonHandler_originalValue[1];
-        if (buttonHandler_originalParameter[1] < 128) // => Sound Parameter
-        {
-          frontPanel_sendData(MIDI_CC,
-              (uint8_t) (buttonHandler_originalParameter[1]),
-              buttonHandler_originalValue[1]);
-        } 
-        else if (buttonHandler_originalParameter[1] >= 128 && (buttonHandler_originalParameter[1] < END_OF_SOUND_PARAMETERS)) // => Sound Parameter above 127
-        {
-          frontPanel_sendData(CC_2,
-          (uint8_t) (buttonHandler_originalParameter[1] - 128),
-          buttonHandler_originalValue[1]);
-        } 
-        else
-        {
-          menu_parseGlobalParam(buttonHandler_originalParameter[1],
-          activeParameters[buttonHandler_originalParameter[1]]);
-        }
-
-        menu_repaintAll();
-
-        buttonHandler_originalParameter[1] = paramNr;
-        buttonHandler_originalValue[1] = activeParameters[paramNr];
-      }
-    }
-  }
+		buttonHandler_prepareStepLock(paramNr);
+	}
     /////////////////////////////
 
 	
@@ -4243,6 +4249,9 @@ uint8_t menu_parseKnobValue(uint8_t potNr, int16_t diff)
 		break;
 	}
 	}
+
+	// an 808/909 instrument chosen as waveform brings its voice settings
+	menu_applyModelPreset(paramNr, activeParameters[paramNr]);
 
 	return 1;
 }

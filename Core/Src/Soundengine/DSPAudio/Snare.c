@@ -9,11 +9,16 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * triggers the 808/909 instruments (AnalogModels.c) and passes them the amp
+ * EG level and decay.
  */
 
 
 
 #include "Soundengine/DSPAudio/Snare.h"
+#include "Soundengine/DSPAudio/AnalogModels.h"
 #include "Soundengine/DSPAudio/squareRootLut.h"
 #include "Soundengine/DSPAudio/modulationNode.h"
 #include "Soundengine/TriggerOut.h"
@@ -102,6 +107,8 @@ void Snare_trigger(const uint8_t vel, const uint8_t note)
 	snareVoice.velo = vel/127.f;
 
 	osc_setBaseNote(&snareVoice.osc,note);
+	//start a new hit in the 808/909 instruments (no effect on the other waveforms)
+	model_trigger(&snareVoice.osc, vel);
 	//TODO noise muss mit transponiert werden
 
 	transient_trigger(&snareVoice.transGen);
@@ -120,6 +127,9 @@ IN_ITCM_RAM void Snare_calcAsync()
 
 	//calc the osc  vol eg
 	snareVoice.egValueOscVol = slopeEg2_calc(&snareVoice.oscVolEg);
+	//the 808/909 models follow the loudness of the voice, the decay knob sets their length
+	snareVoice.osc.modelEnv = snareVoice.egValueOscVol;
+	snareVoice.osc.modelDecay = (float)snareVoice.oscVolEg.decay;
 
 	//turn off trigger signal if trigger gate mode is on and volume == 0
 	/*

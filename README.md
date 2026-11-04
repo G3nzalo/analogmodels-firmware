@@ -1,4 +1,140 @@
-# LXR V2 firmware (desktop, STM32F765VG)
+# AnalogModels: custom firmware for the Erica Synths LXR-02
+
+This is a **modified version** of the LXR-02 desktop firmware 1.7 published by Erica Synths. It is
+**not an official Erica Synths release** and Erica Synths provides no support for it. The boot
+screen shows `AnalogModels 0.3` / `custom FW V 1.7`, and the update file is
+`LXR_AnalogModels_V0.3.img`.
+
+## What it adds
+
+### The instruments of the TR-808 and TR-909
+
+25 instruments, modelled after the circuits of the two drum machines, appear in every **Waveform**
+list after `Sin Tri Saw Rec Noi PWM`. Any of the six voices can play any of them.
+
+| Waveform | Instrument | | Waveform | Instrument |
+|---|---|---|---|---|
+| `BD8` | 808 bass drum | | `RS8` | 808 rim shot |
+| `BD9` | 909 bass drum | | `RS9` | 909 rim shot |
+| `SD8` | 808 snare | | `CL8` | 808 claves |
+| `SD9` | 909 snare | | `CP8` | 808 hand clap |
+| `LT8` `MT8` `HT8` | 808 low, mid, high tom | | `CP9` | 909 hand clap |
+| `LT9` `MT9` `HT9` | 909 low, mid, high tom | | `MA8` | 808 maracas |
+| `LC8` `MC8` `HC8` | 808 low, mid, high conga | | `CB8` | 808 cowbell |
+| `HH8` | 808 hi-hat | | `CY8` | 808 cymbal |
+| `HH9` | 909 hi-hat | | `CR9` `RD9` | 909 crash, ride |
+
+Each instrument makes its own pitch sweeps, clicks, noise and envelopes: the bridged-T resonators
+of the 808 kick, snare, toms, congas, rim shot and claves; the 909 kick's triangle VCO with its fast
+pitch sweep and attack click; the six square oscillators of the 808 metal through the band passes
+of the cowbell, hats and cymbal (low, mid and high band with their own decays); the clap's noise
+bursts and reverb tail; the 909 hats and cymbals (samples in the original) as dense ring-modulated
+metal and noise, the hats at 6 bit like the original sample ROM.
+
+**Choosing an instrument sets up its voice**, so it plays like the original right away: coarse and
+fine at 0 (the original tuning), the amp envelope as a gate (attack 0, slope at the end) with the
+instrument's own decay, filter, pitch EG, FM, transient, drive and saturator off. On the snare voice
+the voice's own noise is turned off (only the instrument plays; turn `Mix` up to add it), on the hat
+voice the open hat gets its decay too. This does not happen while a step is held (the waveform
+becomes a lock of that step) or while automation is recorded.
+
+On an instrument:
+
+- **Decay** sets its length: the instrument has faded out when the amp gate closes. **Coarse** and
+  **Fine** tune it (0 = original tuning).
+- **PWM** is a **tube saturator** (the menu shows `sat`, long name `TubeSat`): an asymmetric
+  triode-style curve with a low shelf in front of it for body, so it adds even and odd harmonics
+  and makes the tail last longer. 0 = off.
+- **Velocity** acts like the accent: harder hits get more click, snap and brightness. With the
+  velocity setting `vol` on (on the page of the pitch EG), it also sets the level.
+- Filter, drive, LFOs, the FX and the other voice settings work as with the original waveforms.
+- A step can play another instrument by locking its **Waveform** (and its decay), see below.
+
+Every hit gets a tiny random pitch drift (about 2 cent) like analog circuits, a retrigger fades the
+previous hit out over 1.5 ms instead of clicking, and a soft limiter keeps overlapping hits and
+extreme settings from clipping hard. The ring mod FX keeps the six original waveforms.
+
+Nothing changes for kits that only use the original waveforms: rendering the voices with the
+original and the modified code on a PC gives bit-identical audio. A kit that uses an instrument
+plays that oscillator silent on the official firmware.
+
+**Kits saved with version 0.2** that use its models keep the waveform numbers, but the list
+changed: `808`, `909` and `Snr` are now `BD8`, `BD9` and `SD8`; `Clp`, `Rim`, `Mtl`, `Bel`, `Cym` and
+`Rid` became `SD9`, `LT8`, `MT8`, `HT8`, `LT9` and `MT9`. Choose the instrument again for those voices.
+
+The instruments run instead of the oscillator they replace. Counted on a Cortex-M7 in QEMU
+(`tools/m7_bench`), a drum voice takes 11k to 15k instructions per block with most instruments
+(13k to 15k with the original waveforms), 20k with `RD9`, 25k with `HH8` and 30k with `CY8`; on
+the cymbal and hat voices about 5k less, as their FM oscillators rest. A whole audio block with the
+example kits takes 87k to 104k instructions (88k with the init kit), the worst case (`CY8` on all
+six voices with the compressor FX) 194k. The budget is about 313k cycles per block. The code is in
+`Core/Src/Soundengine/DSPAudio/AnalogModels.c`, the voice settings in `Core/Src/menu/modelPresets.c`.
+
+### Up to 8 parameter locks per step
+
+Select the voice and a page (for example the filter page), hold a step button, turn knobs and
+release the step: that step then plays with those values and the next step without locks plays the
+kit's sound again. A step now keeps up to **eight** locked parameters (firmware 1.7: two, a third
+replaced one of them). Turning a ninth knob replaces the step's oldest lock; turning a locked knob
+again changes its lock. Locking the **Waveform** (and the **Decay**) plays another instrument on
+that step, for example `CY8` on the last step of a clap track.
+
+- While holding a step, **click the encoder** to clear all locks of that step.
+- Lock 1 and 2 are the ones the step page shows (`p1d`/`p1v`, `p2d`/`p2v`); the others are not shown
+  there.
+- Each pattern has room for 192 locks beyond the first two of each step, shared by its tracks.
+  When they are all used, a new parameter replaces one of the step's locks.
+- Recording automation while playing also fills free locks, so several knobs can be recorded on the
+  same steps. Only when a step has all eight it replaces the lock of the selected automation track,
+  as before.
+- `clear [autom.1]` clears lock 1 of the track, `clear [autom.2]` lock 2 and all further locks.
+  Clearing a track or pattern, copying a track or pattern and filling the next bar with the copy
+  button held take all locks along.
+- Pattern files keep the locks beyond the first two after the data of the original format, so the
+  official firmware still loads them (with two locks per step) and patterns saved with the official
+  firmware load unchanged.
+
+Version 0.2 fixed the problems that made the locks unreliable on firmware 1.7: a third parameter on
+a held step erased lock 1 or 2 on every step of track 1 or 2, holding a step showed and restored
+the locks of track 1 instead of the voice being edited, locks of parameters above number 127 were
+restored on the wrong parameter, the locks of the previously held step were mixed into the next
+one, holding a step changed the track that realtime recording writes into, a step with only lock 2
+got a second lock for the same parameter, and a knob without a parameter used up a lock.
+
+The lock handling is checked by PC tests that run the real menu, button, sequencer, sound engine
+and preset manager code (`tools/host_render/test`: 76 checks for holding steps, playing and
+recording locks, 36 for saving and loading patterns, including files of the original firmware).
+
+## Example kits and patterns
+
+The SD-card project `proj60` ("AnalogMd") has these kits in kit slots 0 to 4, each with a demo
+pattern in the same pattern slot:
+
+| Slot | Kit | Contents |
+|---|---|---|
+| 0 | `TR808` | `BD8`, `MT8`, `RS8`, `SD8`, `CP8` and `HH8`; drum 3 plays a cowbell and the clap voice the cymbal on one step each (waveform locks) |
+| 1 | `TR909` | `BD9`, `CP9`, `RS9`, `SD9`, `RD9` and `HH9`; a tom fill from drum 3 (`LT9`, `MT9`, `HT9` by locks) and a rising snare roll |
+| 2 | `Perc808` | the three congas, claves, cowbell and maracas |
+| 3 | `Bateria` | `BD9`, floor tom `LT9`, ride `RD9`, `SD9`, crash `CR9` and `HH9`; the 2-bar pattern has ghost snares and a tom fill from the floor tom voice |
+| 4 | `LockDemo` | a snare on drum 2: normal, filter opened a bit, longer amp decay, filter closed and short; the kick changes its sound on every beat, with 8 locks on beat 4 |
+
+They are generated with the PC render tool in `tools/host_render`, which runs the real firmware DSP
+code on a computer.
+
+Known limitations:
+
+- The instruments ignore FM input, and the transient page's `Ofs` mode has no effect on them (`Snp`
+  and the sample clicks work).
+- The step page shows only lock 1 and 2 of a step.
+- Tested on an LXR-02 (installing the update, playing the instruments, locks and saturator, saving
+  and loading projects) and on a PC: rendering the firmware's voice code (including a check that
+  kits with the original waveforms render bit-identically), the tests above and a stress test of
+  all instruments on all voice types at extreme settings.
+
+Developed by Gonzalo with the help of Claude, Anthropic's AI assistant. Bug reports and ideas are
+welcome in the issues of this repository.
+
+## Original README
 
 Firmware for the LXR V2 desktop drum machine: an STM32F765 (Cortex-M7, 216 MHz) running the
 drum voices, FX bus, step sequencer, MIDI (DIN + USB), SD-card preset storage and the LCD/button UI.
@@ -15,7 +151,8 @@ drum voices, FX bus, step sequencer, MIDI (DIN + USB), SD-card preset storage an
 Every LXR has a built-in updater (the bootloader) that installs new firmware from the SD card. You
 don't need any extra hardware:
 
-1. [Build the firmware](#building-the-firmware). This creates the update file `LXR_V2_V<version>.img`.
+1. [Build the firmware](#building-the-firmware). This creates the update file `LXR_AnalogModels_V<version>.img`
+   (the official firmware builds `LXR_V2_V<version>.img`).
 2. [Copy it to the SD card and install it](#installing-the-update) on the LXR.
 
 ### Building the firmware
@@ -63,16 +200,17 @@ When the build has finished it shows where the update file is and how to install
 ```
 ======================================================================
   Firmware update file:
-    .../lxr_desktop_app/build/release/LXR_V2_V1.7.img
+    .../lxr_desktop_app/build/release/LXR_AnalogModels_V0.3.img
   ...
 ```
 
-The version in the file name, and on the LXR's start-up screen, is set by `project(VERSION ...)` in
-[CMakeLists.txt](CMakeLists.txt).
+The version in the file name and on the first line of the LXR's start-up screen is set by
+`LXR_MOD_VERSION` in [CMakeLists.txt](CMakeLists.txt); `project(VERSION ...)` stays the version of the
+Erica Synths firmware it is based on (second line of the start-up screen).
 
 ### Installing the update
 
-1. Copy `LXR_V2_V<version>.img` from `build/release/` to the top folder of the SD card. Delete any
+1. Copy `LXR_AnalogModels_V<version>.img` from `build/release/` to the top folder of the SD card. Delete any
    older `LXR*.img` files from the card: the updater installs the first one it finds.
    On a Mac, eject the card in Finder before you take it out. Finder also leaves hidden files starting
    with `._` on the card; the updater ignores them.
@@ -114,7 +252,7 @@ All files the build creates (in `build/<preset>/`):
 
 | File                     | Purpose                                                        |
 |--------------------------|----------------------------------------------------------------|
-| `LXR_V2_V<version>.img`  | **Update file for the SD card** (see [Installing the update](#installing-the-update)) |
+| `LXR_AnalogModels_V<version>.img` | **Update file for the SD card** (see [Installing the update](#installing-the-update)) |
 | `LXR_V2_STM32F765.elf`   | Firmware with debug information, for a debugger               |
 | `LXR_V2_STM32F765.bin`   | Raw firmware image (from 0x08008000)                          |
 | `LXR_V2_STM32F765.hex`   | Intel HEX of the same                                         |

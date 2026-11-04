@@ -9,10 +9,15 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * triggers the 808/909 instruments (AnalogModels.c), passes them the amp EG
+ * level and decay and skips the FM oscillators while one runs.
  */
 
 
 #include "Soundengine/DSPAudio/CymbalVoice.h"
+#include "Soundengine/DSPAudio/AnalogModels.h"
 #include "Soundengine/DSPAudio/squareRootLut.h"
 #include "Soundengine/DSPAudio/modulationNode.h"
 #include "Soundengine/TriggerOut.h"
@@ -113,6 +118,11 @@ void Cymbal_trigger( const uint8_t vel, const uint8_t note)
 	osc_setBaseNote(&cymbalVoice.modOsc,note);
 	osc_setBaseNote(&cymbalVoice.modOsc2,note);
 
+	//start a new hit in the 808/909 instruments (no effect on the other waveforms)
+	model_trigger(&cymbalVoice.osc, vel);
+	model_trigger(&cymbalVoice.modOsc, vel);
+	model_trigger(&cymbalVoice.modOsc2, vel);
+
 	slopeEg2_trigger(&cymbalVoice.oscVolEg);
 	cymbalVoice.velo = vel/127.f;
 
@@ -127,6 +137,11 @@ IN_ITCM_RAM void Cymbal_calcAsync()
 {
 	//calc the osc  vol eg
 	cymbalVoice.egValueOscVol = slopeEg2_calc(&cymbalVoice.oscVolEg);
+	//the 808/909 models follow the loudness of the voice, the decay knob sets their length
+	cymbalVoice.osc.modelEnv = cymbalVoice.egValueOscVol;
+	cymbalVoice.osc.modelDecay = (float)cymbalVoice.oscVolEg.decay;
+	cymbalVoice.modOsc.modelEnv = cymbalVoice.egValueOscVol;
+	cymbalVoice.modOsc2.modelEnv = cymbalVoice.egValueOscVol;
 
 	//turn off trigger signal if trigger gate mode is on and volume == 0
 	/*
@@ -158,12 +173,16 @@ void Cymbal_calcSyncBlock(int16_t* buf, const uint8_t size)
 {
 		int16_t mod[size];
 		int16_t mod2[size];
-		//calc next mod osc sample
-		calcNextOscSampleBlock(&cymbalVoice.modOsc,mod,size,cymbalVoice.fmModAmount1, cymbalVoice.pwm);
-		calcNextOscSampleBlock(&cymbalVoice.modOsc2,mod2,size,cymbalVoice.fmModAmount2, cymbalVoice.pwm);
+		//the 808/909 instruments ignore FM, so the FM oscillators can rest
+		if(!osc_isModel(cymbalVoice.osc.waveform))
+		{
+			//calc next mod osc sample
+			calcNextOscSampleBlock(&cymbalVoice.modOsc,mod,size,cymbalVoice.fmModAmount1, cymbalVoice.pwm);
+			calcNextOscSampleBlock(&cymbalVoice.modOsc2,mod2,size,cymbalVoice.fmModAmount2, cymbalVoice.pwm);
 
-		//combine both mod oscs to 1 modulation signal
-		bufferTool_addBuffersSaturating(mod,mod2,size);
+			//combine both mod oscs to 1 modulation signal
+			bufferTool_addBuffersSaturating(mod,mod2,size);
+		}
 
 		calcNextOscSampleFmBlock(&cymbalVoice.osc,mod,buf,size,1.f, cymbalVoice.pwm) ;
 #if USE_REVERB

@@ -5,6 +5,9 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * the boot screen shows the custom firmware name and version.
  */
 
 /* Includes ------------------------------------------------------------------*/
@@ -56,6 +59,13 @@ typedef struct ImageFileHeaderStruct
 // The CMake build passes FIRMWARE_VERSION from project(VERSION); this is the fallback for STM32CubeIDE.
 #ifndef FIRMWARE_VERSION
 #define FIRMWARE_VERSION " 2.00"
+#endif
+// Custom firmware name and version (CMake passes them from LXR_MOD_NAME/LXR_MOD_VERSION)
+#ifndef MOD_NAME
+#define MOD_NAME "AnalogModels"
+#endif
+#ifndef MOD_VERSION
+#define MOD_VERSION "0.3"
 #endif
 //#define f_unmount(path) f_mount(0, path, 0)
 
@@ -350,11 +360,12 @@ int main(void)
 
 #else
 	//print boot up message
+	//this is modified firmware, so the boot screen has to say so (see NOTICE.md)
 lcd_clear();
-lcd_string("Sonic Potions");
+lcd_string(MOD_NAME " " MOD_VERSION);
 //goto 2nd line
 lcd_setcursor(0,2);
-lcd_string("LXR2 Drums V");
+lcd_string("custom FW V");
 lcd_string(FIRMWARE_VERSION);
 #endif
 

@@ -9,6 +9,9 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * up to NUM_STEP_LOCKS parameter locks per step with a lock pool per pattern.
  */
 
 
@@ -84,6 +87,28 @@ typedef union
 	uint64_t quadword;
 }ActiveSteps;
 
+//------------------------------------------------------------------------------
+// More parameter locks per step (custom firmware). Lock 1 and 2 of a step are
+// param1/param2 of its Step, the further locks come from a pool of extra locks
+// that each pattern shares between its tracks. A lock stores the parameter
+// like a CC number: parameter+1 below 128, the parameter number from 128 on.
+#define NUM_STEP_LOCKS		8		// parameter locks per step
+#define LOCK_POOL_SIZE		192		// extra locks (lock 3 and up) per pattern
+
+typedef struct ExtraLockStruct
+{
+	uint8_t		track;
+	uint8_t		step;
+	uint8_t		nr;		// the parameter, like Step.param1Nr
+	uint8_t		val;
+}ExtraLock;
+
+typedef struct LockPoolStruct
+{
+	uint8_t		count;					// locks in use, at the start of lock[]
+	ExtraLock	lock[LOCK_POOL_SIZE];
+}LockPool;
+
 /*
 typedef struct PatternSettingsStruct
 {
@@ -114,6 +139,7 @@ typedef struct PatternBackupBufferStruct
 	uint8_t length[NUM_TRACKS];	//only used in euklid generator?
 	uint8_t shuffle;
 	uint8_t kitNr;
+	LockPool lockPool;		// the extra parameter locks of the pattern
 }PatternBackupBuffer;
 
 /*
@@ -273,6 +299,32 @@ void seq_setErasingMode(uint8_t active);
 void seq_clearTrack(uint8_t trackNr, uint8_t pattern);
 //------------------------------------------------------------------------------
 void seq_clearAutomation(uint8_t trackNr, uint8_t pattern, uint8_t automTrack);
+
+/** clears all parameter locks of one step (custom firmware) */
+void seq_clearStepLocks(uint8_t trackNr, uint8_t pattern, uint8_t step);
+//------------------------------------------------------------------------------
+// parameter locks of a step, lock 1 and 2 and the extra ones (custom firmware)
+/** the extra lock pool of a pattern */
+LockPool* seq_getLockPool(uint8_t pattern);
+/** all locks of a step, lock 1 and 2 first: fills nr[] and val[] (room for
+ *  NUM_STEP_LOCKS each) and returns how many there are */
+uint8_t seq_getStepLocks(uint8_t pattern, uint8_t track, uint8_t step, uint8_t* nr, uint8_t* val);
+/** locks parameter nr (stored like Step.param1Nr) of a step to val: changes the
+ *  step's lock of that parameter, or takes a free lock. 0 if none is free. */
+uint8_t seq_setStepLock(uint8_t pattern, uint8_t track, uint8_t step, uint8_t nr, uint8_t val);
+/** 1 if one more parameter can be locked on the step */
+uint8_t seq_stepHasFreeLock(uint8_t pattern, uint8_t track, uint8_t step);
+/** removes the lock of parameter nr from a step */
+void seq_removeStepLock(uint8_t pattern, uint8_t track, uint8_t step, uint8_t nr);
+/** removes the extra locks of a step, of all steps of a track (step 0xff) or of
+ *  the whole pattern (track 0xff) */
+void seq_removeExtraLocks(uint8_t pattern, uint8_t track, uint8_t step);
+/** gives a step the extra locks of another step (the ones it had are removed) */
+void seq_copyExtraLocks(uint8_t srcPattern, uint8_t srcTrack, uint8_t srcStep,
+		uint8_t dstPattern, uint8_t dstTrack, uint8_t dstStep);
+/** after loading a pool from a file: drops broken entries, doubles and extra
+ *  locks beyond NUM_STEP_LOCKS per step */
+void seq_checkLockPool(uint8_t pattern);
 //------------------------------------------------------------------------------
 void seq_clearPattern(uint8_t pattern);
 //------------------------------------------------------------------------------

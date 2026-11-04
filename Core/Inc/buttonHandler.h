@@ -10,6 +10,11 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * the lock buffers of a held step are internal now (up to NUM_STEP_LOCKS
+ * locks), see buttonHandler_prepareStepLock() and
+ * buttonHandler_clearArmedStepLocks().
  */ 
 
 
@@ -19,10 +24,6 @@
 #include "main.h"
 
 extern uint8_t buttonHandler_selectedStep;
-extern volatile uint16_t buttonHandler_originalParameter[2];	//saves parameter number for step automation reset (stgep assign)
-extern uint8_t buttonHandler_originalValue[2]; 
-extern uint8_t buttonHandler_resetLock1;
-extern uint8_t buttonHandler_resetLock2;
 
 #define BUTTON_TIMEOUT 2000//(38) //~500[ms]
 #define NO_STEP_SELECTED -1
@@ -178,6 +179,11 @@ uint8_t buttonHandler_getLoad();
 uint8_t buttonHandler_getSave();
 //--------------------------------------------------------
 int8_t buttonHandler_getArmedAutomationStep();
+/** clears the parameter locks of the held step (custom firmware: encoder click while holding a step) */
+void buttonHandler_clearArmedStepLocks();
+/** a knob changes sound parameter paramNr while a step is held (custom firmware): the
+ *  step gets a lock for it, a free one or, when all are used, one of its locks in turn */
+void buttonHandler_prepareStepLock(uint16_t paramNr);
 //--------------------------------------------------------
 void buttonHandler_muteVoice(uint8_t voice, uint8_t isMuted);
 //--------------------------------------------------------

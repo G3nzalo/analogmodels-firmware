@@ -10,9 +10,14 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * pattern files and tmp.pat carry the extra parameter locks of the pattern
+ * (lock 3 and up of a step) behind the data of the original format.
  */ 
 //#include "../config.h"
 #include <frontPanelParser_ui.h>
+#include <string.h>
 #include "Preset/PresetManager.h"
 //#include "../Hardware/SD/ff.h"
 #include "ff.h"
@@ -299,6 +304,44 @@ FRESULT preset_LoadTmpKit()
 		return res;
 }
 
+//----------------------------------------------------
+// The extra parameter locks of a pattern (custom firmware), behind the data of
+// the original pattern format: a tag, the number of locks and the locks. The
+// original firmware stops reading before them, and a file without them loads
+// with no extra locks.
+static const char preset_lockPoolTag[4] = { 'X', 'L', 'K', '1' };
+
+static void preset_writeLockPool(uint8_t patternNr)
+{
+	UINT bytesWritten;
+	const LockPool* pool = seq_getLockPool(patternNr);
+	uint8_t count = pool->count;
+	if(count > LOCK_POOL_SIZE) count = LOCK_POOL_SIZE;
+	f_write((FIL*)&SDFile, preset_lockPoolTag, sizeof(preset_lockPoolTag), &bytesWritten);
+	f_write((FIL*)&SDFile, &count, 1, &bytesWritten);
+	if(count)
+		f_write((FIL*)&SDFile, pool->lock, count * sizeof(ExtraLock), &bytesWritten);
+}
+
+static void preset_readLockPool(uint8_t patternNr)
+{
+	UINT bytesRead = 0;
+	LockPool* pool = seq_getLockPool(patternNr);
+	char tag[sizeof(preset_lockPoolTag)];
+	uint8_t count = 0;
+	pool->count = 0;
+	if((f_read((FIL*)&SDFile, tag, sizeof(tag), &bytesRead) != FR_OK) || (bytesRead != sizeof(tag)) ||
+			(memcmp(tag, preset_lockPoolTag, sizeof(tag)) != 0))
+		return;
+	if((f_read((FIL*)&SDFile, &count, 1, &bytesRead) != FR_OK) || (bytesRead != 1))
+		return;
+	if(count > LOCK_POOL_SIZE) count = LOCK_POOL_SIZE;
+	if(f_read((FIL*)&SDFile, pool->lock, count * sizeof(ExtraLock), &bytesRead) != FR_OK)
+		return;
+	pool->count = (uint8_t)(bytesRead / sizeof(ExtraLock));
+	seq_checkLockPool(patternNr);
+}
+
 FRESULT preset_LoadTmpPat()
 {
 
@@ -453,6 +496,12 @@ FRESULT preset_LoadTmpPat()
 
 		}
 
+		//the extra parameter locks (custom firmware)
+		if(success)
+			preset_readLockPool(patternNr);
+		else
+			seq_getLockPool(patternNr)->count = 0;
+
 		if( success == 0)
 		{
 
@@ -576,6 +625,9 @@ FRESULT preset_saveTmpPat()
 
 		//write associated kit nr
 		f_write((FIL*)&SDFile,&seq_patternSet.kitNr[presetNr],sizeof(uint8_t),&bytesWritten);
+
+		//the extra parameter locks (custom firmware)
+		preset_writeLockPool(presetNr);
 
 #endif
 
@@ -1622,6 +1674,9 @@ static void preset_writePatternData(uint8_t patternNr)
 		//write associated kit nr
 		f_write((FIL*)&SDFile,&seq_patternSet.kitNr[patternNr],sizeof(uint8_t),&bytesWritten);
 
+		//the extra parameter locks (custom firmware)
+		preset_writeLockPool(patternNr);
+
 #endif
 }
 
@@ -1965,6 +2020,12 @@ static uint8_t preset_readPatternData(uint8_t patternNr, uint8_t dataVersion)
 		if(bytesRead == 0) success = 0;
 
 	}
+
+	//the extra parameter locks (custom firmware), only behind complete data
+	if(success && (dataVersion > 2))
+		preset_readLockPool(patternNr);
+	else
+		seq_getLockPool(patternNr)->count = 0;
 
 	return success;
 #endif

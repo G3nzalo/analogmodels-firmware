@@ -9,11 +9,17 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * triggers the 808/909 instruments (AnalogModels.c), passes them the amp EG
+ * level and decay, skips the FM oscillators while one runs and plays them at
+ * the level of the other voices.
  */
 
 
 
 #include "Soundengine/DSPAudio/HiHat.h"
+#include "Soundengine/DSPAudio/AnalogModels.h"
 #include "Soundengine/DSPAudio/squareRootLut.h"
 #include "Soundengine/DSPAudio/modulationNode.h"
 #include "Soundengine/TriggerOut.h"
@@ -113,6 +119,11 @@ void HiHat_trigger( uint8_t vel, uint8_t isOpen, const uint8_t note)
 	osc_setBaseNote(&hatVoice.modOsc,note);
 	osc_setBaseNote(&hatVoice.modOsc2,note);
 
+	//start a new hit in the 808/909 instruments (no effect on the other waveforms)
+	model_trigger(&hatVoice.osc, vel);
+	model_trigger(&hatVoice.modOsc, vel);
+	model_trigger(&hatVoice.modOsc2, vel);
+
 	hatVoice.isOpen = isOpen;
 	hatVoice.oscVolEg.decay = isOpen?hatVoice.decayOpen:hatVoice.decayClosed;
 
@@ -129,6 +140,11 @@ IN_ITCM_RAM void HiHat_calcAsync( )
 {
 	//calc the osc  vol eg
 	hatVoice.egValueOscVol = slopeEg2_calc(&hatVoice.oscVolEg);
+	//the 808/909 models follow the loudness of the voice, the decay knob sets their length
+	hatVoice.osc.modelEnv = hatVoice.egValueOscVol;
+	hatVoice.osc.modelDecay = (float)hatVoice.oscVolEg.decay;
+	hatVoice.modOsc.modelEnv = hatVoice.egValueOscVol;
+	hatVoice.modOsc2.modelEnv = hatVoice.egValueOscVol;
 
 	//turn off trigger signal if trigger gate mode is on and volume == 0
 	/*
@@ -166,14 +182,19 @@ void HiHat_calcSyncBlock(int16_t* buf, const uint8_t size)
 {
 	//2 buffers for the mod oscs
 	int16_t mod1[size],mod2[size];
-	//calc next mod osc samples, scaled with mod amount
-	calcNextOscSampleBlock(&hatVoice.modOsc,mod1,size, hatVoice.fmModAmount1, hatVoice.pwm);
-	calcNextOscSampleBlock(&hatVoice.modOsc2,mod2,size,  hatVoice.fmModAmount2, hatVoice.pwm);
+	//the 808/909 instruments ignore FM, so the FM oscillators can rest
+	if(!osc_isModel(hatVoice.osc.waveform))
+	{
+		//calc next mod osc samples, scaled with mod amount
+		calcNextOscSampleBlock(&hatVoice.modOsc,mod1,size, hatVoice.fmModAmount1, hatVoice.pwm);
+		calcNextOscSampleBlock(&hatVoice.modOsc2,mod2,size,  hatVoice.fmModAmount2, hatVoice.pwm);
 
-	//combine both mod oscs to 1 modulation signal
-	bufferTool_addBuffersSaturating(mod1,mod2,size);
+		//combine both mod oscs to 1 modulation signal
+		bufferTool_addBuffersSaturating(mod1,mod2,size);
+	}
 
-	calcNextOscSampleFmBlock(&hatVoice.osc,mod1,buf,size,0.5f, hatVoice.pwm) ;
+	//the 808/909 instruments play at the same level as on the other voices
+	calcNextOscSampleFmBlock(&hatVoice.osc,mod1,buf,size,osc_isModel(hatVoice.osc.waveform)?1.f:0.5f, hatVoice.pwm) ;
 
 #if USE_REVERB
 	if(fxBus.fxType != FX_REVERB)

@@ -9,11 +9,16 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * triggers the 808/909 instruments (AnalogModels.c) and passes them the amp
+ * EG level and decay.
  */
 
 
 #include "Soundengine/DSPAudio/DrumVoice.h"
 #include "Soundengine/DSPAudio/Oscillator.h"
+#include "Soundengine/DSPAudio/AnalogModels.h"
 #include "Soundengine/DSPAudio/random.h"
 #include "math.h"
 #include "Soundengine/DSPAudio/squareRootLut.h"
@@ -164,6 +169,10 @@ void Drum_trigger(const uint8_t voiceNr, const uint8_t vol, const uint8_t note)
 	osc_setBaseNote(&voiceArray[voiceNr].osc,note);
 	osc_setBaseNote(&voiceArray[voiceNr].modOsc,note);
 
+	//start a new hit in the 808/909 instruments (no effect on the other waveforms)
+	model_trigger(&voiceArray[voiceNr].osc, vol);
+	model_trigger(&voiceArray[voiceNr].modOsc, vol);
+
 
 	DecayEg_trigger(&voiceArray[voiceNr].oscPitchEg);
 	slopeEg2_trigger(&voiceArray[voiceNr].oscVolEg);
@@ -225,6 +234,14 @@ IN_ITCM_RAM void calcDrumVoiceAsync(const uint8_t voiceNr)
 		}
 	}
 	*/
+#endif
+
+#if (AMP_EG_SYNC==0)
+	//the 808/909 models follow the loudness of the voice, the decay knob sets their length
+	voiceArray[voiceNr].osc.modelEnv = (float)voiceArray[voiceNr].ampFilterInput;
+	voiceArray[voiceNr].modOsc.modelEnv = voiceArray[voiceNr].osc.modelEnv;
+	voiceArray[voiceNr].osc.modelDecay = (float)voiceArray[voiceNr].oscVolEg.decay;
+	voiceArray[voiceNr].modOsc.modelDecay = voiceArray[voiceNr].osc.modelDecay;
 #endif
 
 	//update osc phaseInc

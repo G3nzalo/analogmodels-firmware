@@ -1,0 +1,9 @@
+obj/
+render
+out/
+sd/
+__pycache__/
+test/obj_*/
+test/plock_test
+test/patfile_test
+test/sd*/

@@ -10,6 +10,10 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * the waveform list names the 808/909 instruments, and the PWM knob is
+ * labelled "sat" (tube saturator) while one runs.
  */ 
 
 
@@ -43,6 +47,7 @@
 #define MENU_STEP_FLAM	 	24
 #define MENU_STEP_SHIFT	 	25
 #define MENU_AUDIO_OUT_FX	26
+#define MENU_FX_WAVEFORM	27	// the ring mod FX only has the six original waveforms
 
 //-----------------------------------------------------------------
 // Shared texts. Reduce mem usage by pooling common text
@@ -297,6 +302,43 @@ const char syncRateNames[][4]  =
 //-----------------------------------------------------------------
 const char waveformNames[][4]  =
 {
+	{31},		//number of entries
+	{"Sin"}	,
+	{"Tri"}	,
+	{"Saw"}	,
+	{"Rec"}	,
+	{"Noi"}	,
+	{"PWM"}	,
+	//808/909 instruments, see AnalogModels.h (custom firmware)
+	{"BD8"}	,
+	{"BD9"}	,
+	{"SD8"}	,
+	{"SD9"}	,
+	{"LT8"}	,
+	{"MT8"}	,
+	{"HT8"}	,
+	{"LT9"}	,
+	{"MT9"}	,
+	{"HT9"}	,
+	{"LC8"}	,
+	{"MC8"}	,
+	{"HC8"}	,
+	{"RS8"}	,
+	{"RS9"}	,
+	{"CL8"}	,
+	{"CP8"}	,
+	{"CP9"}	,
+	{"MA8"}	,
+	{"CB8"}	,
+	{"HH8"}	,
+	{"HH9"}	,
+	{"CY8"}	,
+	{"CR9"}	,
+	{"RD9"}	,
+};
+//-----------------------------------------------------------------
+const char fxWaveNames[][4]  =
+{
 	{6},		//number of entries
 	{"Sin"}	,
 	{"Tri"}	,
@@ -304,7 +346,6 @@ const char waveformNames[][4]  =
 	{"Rec"}	,
 	{"Noi"}	,
 	{"PWM"}	,
-
 };
 //-----------------------------------------------------------------
 const char outputNames[][7]  =
@@ -480,6 +521,7 @@ const char shortNames[][4]  =
 	{"kcm"},
 	{"flm"},
 	{"shf"},
+	{"sat"},
 
 };
 //-----------------------------------------------------------------
@@ -610,6 +652,7 @@ const char longNames[][16] =
 	{"KitChMde"},
 	{"Flam"},
 	{"Shift"},
+	{"TubeSat"},
 };
 
 

@@ -25,6 +25,13 @@ project(LXR_V2_STM32F765
     LANGUAGES C ASM
 )
 
+# Custom firmware (not an official Erica Synths release). Its name and version
+# are shown on the boot screen, as the GPL additional terms in NOTICE.md
+# require, and used for the update file name. PROJECT_VERSION stays the
+# version of the Erica Synths firmware this is based on.
+set(LXR_MOD_NAME "AnalogModels")
+set(LXR_MOD_VERSION "0.3")
+
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type (Debug or Release)" FORCE)
 endif()
@@ -85,7 +92,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 
 # Linked at 0x08008000, behind the 32 KB bootloader.
 lxr_firmware_executable(${PROJECT_NAME} LINKER_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/STM32F765VGTX_FLASH.ld)
-lxr_add_firmware_outputs(${PROJECT_NAME} IMAGE_MAGIC LXRV2IMG IMAGE_NAME LXR_V2_V${PROJECT_VERSION})
+lxr_add_firmware_outputs(${PROJECT_NAME} IMAGE_MAGIC LXRV2IMG IMAGE_NAME LXR_${LXR_MOD_NAME}_V${LXR_MOD_VERSION})
 
 # "flash": application only, the bootloader on the device is left alone.
 lxr_add_openocd_flash_target(flash
@@ -184,6 +191,6 @@ if(TARGET full_image)
     list(APPEND info_depends full_image)  # print after everything else is done
 endif()
 lxr_add_update_info(update_info
-    IMAGE ${CMAKE_CURRENT_BINARY_DIR}/LXR_V2_V${PROJECT_VERSION}.img
+    IMAGE ${CMAKE_CURRENT_BINARY_DIR}/LXR_${LXR_MOD_NAME}_V${LXR_MOD_VERSION}.img
     DEPENDS ${info_depends}
 )
