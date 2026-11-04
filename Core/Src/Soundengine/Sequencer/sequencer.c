@@ -14,7 +14,8 @@
  * seq_clearStepLocks() clears the parameter locks of a single step, and a
  * step plays up to NUM_STEP_LOCKS parameter locks: lock 1 and 2 in its Step,
  * the others from the lock pool of the pattern (seq_lockPool).
- * Also fixes from OpenElixir-02 by Moritz Waser (see the git history).
+ * Also fixes from OpenElixir-02 by Moritz Waser and from 0Delfo0 (see the git
+ * history).
  */
 
 

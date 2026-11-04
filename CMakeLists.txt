@@ -30,7 +30,7 @@ project(LXR_V2_STM32F765
 # require, and used for the update file name. PROJECT_VERSION stays the
 # version of the Erica Synths firmware this is based on.
 set(LXR_MOD_NAME "AnalogModels")
-set(LXR_MOD_VERSION "0.3")
+set(LXR_MOD_VERSION "0.4")
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type (Debug or Release)" FORCE)

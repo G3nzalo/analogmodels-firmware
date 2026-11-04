@@ -66,7 +66,7 @@ typedef struct ImageFileHeaderStruct
 #define MOD_NAME "AnalogModels"
 #endif
 #ifndef MOD_VERSION
-#define MOD_VERSION "0.3"
+#define MOD_VERSION "0.4"
 #endif
 //#define f_unmount(path) f_mount(0, path, 0)
 

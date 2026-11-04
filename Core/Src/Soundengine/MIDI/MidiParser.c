@@ -11,7 +11,8 @@
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
  *
  * Modified 2026 for a custom firmware (not an official Erica Synths release):
- * fixes from OpenElixir-02 by Moritz Waser (see the git history).
+ * fixes from OpenElixir-02 by Moritz Waser and from 0Delfo0 (see the git
+ * history).
  */
 
 
