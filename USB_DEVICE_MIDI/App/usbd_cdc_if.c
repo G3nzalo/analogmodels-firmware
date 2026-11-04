@@ -16,6 +16,8 @@
   *                             www.st.com/SLA0044
   *
   ******************************************************************************
+  * Modified 2026 for a custom firmware (not an official Erica Synths release):
+  * fix from OpenElixir-02 by Moritz Waser (see the git history).
   */
 /* USER CODE END Header */
 

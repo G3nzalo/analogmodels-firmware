@@ -17,6 +17,7 @@
  * gives the automation track back on release. Clicking the encoder while a
  * step is held clears that step's locks. A held step has up to
  * NUM_STEP_LOCKS locks (buttonHandler_prepareStepLock).
+ * Also fixes from OpenElixir-02 by Moritz Waser (see the git history).
  */
 #include <frontPanelParser_ui.h>
 #include "Soundengine/MIDI/MidiMessages.h"

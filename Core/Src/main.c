@@ -8,6 +8,7 @@
  *
  * Modified 2026 for a custom firmware (not an official Erica Synths release):
  * the boot screen shows the custom firmware name and version.
+ * Also fixes from OpenElixir-02 by Moritz Waser (see the git history).
  */
 
 /* Includes ------------------------------------------------------------------*/

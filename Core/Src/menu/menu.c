@@ -13,6 +13,7 @@
  * NUM_STEP_LOCKS parameters (buttonHandler_prepareStepLock), an already locked
  * parameter keeps its lock, a knob without a parameter does not use up a
  * lock, and clicking the encoder while a step is held clears that step's locks.
+ * Also fixes from OpenElixir-02 by Moritz Waser (see the git history).
  */
 
 #include "menu/menu.h"

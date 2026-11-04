@@ -13,6 +13,7 @@
  * Modified 2026 for a custom firmware (not an official Erica Synths release):
  * triggers the 808/909 instruments (AnalogModels.c) and passes them the amp
  * EG level and decay.
+ * Also fixes from OpenElixir-02 by Moritz Waser (see the git history).
  */
 
 

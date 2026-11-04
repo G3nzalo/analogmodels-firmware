@@ -12,6 +12,7 @@
  *
  * Modified 2026 for a custom firmware (not an official Erica Synths release):
  * up to NUM_STEP_LOCKS parameter locks per step with a lock pool per pattern.
+ * Also fixes from OpenElixir-02 by Moritz Waser (see the git history).
  */
 
 

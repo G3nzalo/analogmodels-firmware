@@ -14,6 +14,7 @@
  * Modified 2026 for a custom firmware (not an official Erica Synths release):
  * pattern files and tmp.pat carry the extra parameter locks of the pattern
  * (lock 3 and up of a step) behind the data of the original format.
+ * Also fixes from OpenElixir-02 by Moritz Waser (see the git history).
  */ 
 //#include "../config.h"
 #include <frontPanelParser_ui.h>
