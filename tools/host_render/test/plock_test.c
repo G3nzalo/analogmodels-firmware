@@ -383,6 +383,22 @@ int main(void)
 			lockOf(SNARE, R, PAR_VELOD4) == baseD - 6, "three knobs recorded into step 21: three locks, the filter updated");
 		engineSet(PAR_FILTER_FREQ_4, baseF); engineSet(PAR_RESO_4, baseQ); engineSet(PAR_VELOD4, baseD);
 		seq_clearStepLocks(SNARE, seq_activePattern, R);
+
+		printf("\n12) a knob without a parameter and CC 0 record nothing\n");
+		seq_recordActive = 1;
+		turn(SUB_AEG, 5, +4);	/* no parameter on this knob */
+		CHECK(numLocks(SNARE, R) == 0, "an empty knob slot while recording: no lock on step 21 (%d)", numLocks(SNARE, R));
+		seq_clearStepLocks(SNARE, seq_activePattern, R);
+		seq_setStepLock(seq_activePattern, SNARE, R, code(PAR_FILTER_FREQ_4), 50);	/* lock 1 */
+		seq_setActiveAutomationTrack(0);
+		seq_recordAutomation(SNARE, 0, 77);
+		seq_recordAutomation(SNARE, NO_AUTOMATION, 77);
+		CHECK(numLocks(SNARE, R) == 1 && lockOf(SNARE, R, PAR_FILTER_FREQ_4) == 50,
+			"parameter 0 and NO_AUTOMATION are not recorded: the step keeps its lock (%d)", numLocks(SNARE, R));
+		seq_clearStepLocks(SNARE, seq_activePattern, R);
+		seq_recordActive = 0;
+		engineSet(PAR_BANK_CHANGE, 5);	/* sent as CC 0, like a kit load does */
+		CHECK(midiParser_originalCcValues[0] == 5, "CC 0 stays inside the CC value table (%d)", midiParser_originalCcValues[0]);
 		seq_setMainStep(seq_activePattern, SNARE, R, 0);
 	}
 

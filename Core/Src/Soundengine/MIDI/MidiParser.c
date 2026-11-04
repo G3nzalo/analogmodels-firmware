@@ -11,7 +11,8 @@
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
  *
  * Modified 2026 for a custom firmware (not an official Erica Synths release):
- * fixes from OpenElixir-02 by Moritz Waser (see the git history).
+ * fixes from OpenElixir-02 by Moritz Waser and from 0Delfo0 (see the git
+ * history).
  */
 
 
@@ -172,8 +173,10 @@ void midiParser_ccHandler(MidiMsg msg, uint8_t updateOriginalValue, uint8_t isFl
 	{
 
 		const uint16_t paramNr = msg.data1-1;
+		//msg.data1, not paramNr+1: paramNr underflows to 0xFFFF for CC 0 and the
+		//index becomes 65536. For every other CC the two are the same value.
 		if(updateOriginalValue && !isFloatModulator) {
-			midiParser_originalCcValues[paramNr+1] = value.itg;
+			midiParser_originalCcValues[msg.data1] = value.itg;
 		}
 
 		switch(msg.data1)

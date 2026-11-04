@@ -2,8 +2,8 @@
 
 This is a **modified version** of the LXR-02 desktop firmware 1.7 published by Erica Synths. It is
 **not an official Erica Synths release** and Erica Synths provides no support for it. The boot
-screen shows `AnalogModels 0.3` / `custom FW V 1.7`, and the update file is
-`LXR_AnalogModels_V0.3.img`.
+screen shows `AnalogModels 0.4` / `custom FW V 1.7`, and the update file is
+`LXR_AnalogModels_V0.4.img`.
 
 ## What it adds
 
@@ -102,8 +102,45 @@ one, holding a step changed the track that realtime recording writes into, a ste
 got a second lock for the same parameter, and a knob without a parameter used up a lock.
 
 The lock handling is checked by PC tests that run the real menu, button, sequencer, sound engine
-and preset manager code (`tools/host_render/test`: 76 checks for holding steps, playing and
+and preset manager code (`tools/host_render/test`: 79 checks for holding steps, playing and
 recording locks, 36 for saving and loading patterns, including files of the original firmware).
+
+### Fixes of the stock firmware (version 0.4)
+
+Version 0.4 fixes more than 30 bugs of firmware 1.7. Most of them were found in the firmware review by
+jhw in [erica-synths/lxr-desktop-app#3](https://github.com/erica-synths/lxr-desktop-app/issues/3)
+(its IDs are in the commit messages). Each comes in its own commit with its author:
+
+- **From [OpenElixir-02](https://github.com/tunefish777/openelixir-02)** by Moritz Waser, released
+  in its versions 0.2 to 1.2 and tested on hardware by its author:
+  - MIDI: sequencer notes were sent twice and left notes hanging on external gear; the per-voice CC
+    channel filter checked the wrong voice; clock bytes inside a message corrupted it; bank select
+    could load past the last kit.
+  - Sequencer: `SHIFT` + `CONFIG` made the next step press set the length of all tracks; a song
+    starting with `LOOP` played a pattern that doesn't exist, and the song end didn't send MIDI stop;
+    the internal tempo ran up to 0.2 % fast.
+  - Memory: NRPNs 128-255 (such as the mutes), steps armed with `SHIFT` + a held select button,
+    recording, rolls and flams while stopped, front panel values, menu names, the FX type, USB-MIDI
+    and the RAT distortion read or wrote past their tables; switching the delay to ping-pong wrote up
+    to 32 KB past the FX buffer.
+  - Sound: a pitch EG slope of 127 silenced the voice; the snare and the mono compressor wrapped
+    around instead of clipping.
+  - SD card: saving over a project corrupted the name of kit 1; project save, reload and clear kit
+    used the kit last scrolled to on the load/save page instead of the current one; a failed or
+    incomplete write (full card) said "OK", and one error blocked the card until a reboot; a damaged
+    pattern or settings file was half loaded; a new kit kept the last 8 parameters of the previous one.
+    A **project save now writes into a new folder first** and replaces the saved project only when
+    everything was written, so it needs free space for a second copy of the project (a few hundred KB).
+- **From 0Delfo0** (proposed to OpenElixir-02): every kit load and morph wrote a byte 64 KB past a
+  table, which landed in the pattern memory (a CC 0 from MIDI did the same); the tempo with shuffle on
+  still used the integer division.
+- **In AnalogModels:** a knob over an empty slot of a page does nothing (it recorded automation into
+  a lock of the step).
+
+The demo kits and patterns render bit-identically to version 0.3 on a PC: only the cases above
+sound different. Still open from the review, among others: MIDI Continue starts from step 1 and
+there is no Song Position Pointer, the Euclid generator saves length 16 as 0, and pulling the SD
+card during an access hangs the unit.
 
 ## Example kits and patterns
 
@@ -200,7 +237,7 @@ When the build has finished it shows where the update file is and how to install
 ```
 ======================================================================
   Firmware update file:
-    .../lxr_desktop_app/build/release/LXR_AnalogModels_V0.3.img
+    .../lxr_desktop_app/build/release/LXR_AnalogModels_V0.4.img
   ...
 ```
 

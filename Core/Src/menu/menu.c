@@ -11,8 +11,8 @@
  * an instrument when it is chosen (modelPresets.c) and labels the PWM knob
  * "sat" (tube saturator) while one runs. A held step locks up to
  * NUM_STEP_LOCKS parameters (buttonHandler_prepareStepLock), an already locked
- * parameter keeps its lock, a knob without a parameter does not use up a
- * lock, and clicking the encoder while a step is held clears that step's locks.
+ * parameter keeps its lock, a knob without a parameter does nothing, and
+ * clicking the encoder while a step is held clears that step's locks.
  * Also fixes from OpenElixir-02 by Moritz Waser (see the git history).
  */
 
@@ -4056,8 +4056,11 @@ uint8_t menu_parseKnobValue(uint8_t potNr, int16_t diff)
 
 
 
-	// an empty knob slot must not use up one of the two locks of a held step
-	if((paramNr == PAR_NONE) && (buttonHandler_getArmedAutomationStep() != NO_STEP_SELECTED))
+	// a knob over an empty slot of the page does nothing (U-B5 of the firmware
+	// review in erica-synths/lxr-desktop-app#3): it sent parameter 0, which the
+	// sound engine recorded as automation into a lock of the step (with a held
+	// step or while recording), and has no sound parameter to change
+	if(paramNr == PAR_NONE)
 		return 0;
 
 	//parameter fetch. given the value of the pot, and the parameter number

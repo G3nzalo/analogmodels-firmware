@@ -14,7 +14,8 @@
  * seq_clearStepLocks() clears the parameter locks of a single step, and a
  * step plays up to NUM_STEP_LOCKS parameter locks: lock 1 and 2 in its Step,
  * the others from the lock pool of the pattern (seq_lockPool).
- * Also fixes from OpenElixir-02 by Moritz Waser (see the git history).
+ * Also fixes from OpenElixir-02 by Moritz Waser and from 0Delfo0 (see the git
+ * history).
  */
 
 
@@ -1629,7 +1630,7 @@ void seq_resetDeltaAndTick()
 	{
 		//seq_deltaT = 0;^
 
-		seq_deltaT 	= (1000*60)/seq_tempo; 	//bei 12 = 500ms = time for one beat
+		seq_deltaT 	= (1000*60.f)/seq_tempo; 	//bei 12 = 500ms = time for one beat (float, as the other two: the truncation cost up to 0.45 % at 274 bpm)
 		seq_deltaT /= 96.f; //we run the internal clock at 96ppq -> seq clock 32 ppq == prescaler 3, midi clock 24 ppq == prescale 4
 		seq_deltaT *= 4;
 
@@ -2340,6 +2341,11 @@ uint8_t seq_isAutomationStepArmed()
 //------------------------------------------------------------------------
 void seq_recordAutomation(uint8_t voice, uint8_t dest, uint8_t value)
 {
+	//0 and NO_AUTOMATION are no parameters: recorded, they only erased a lock
+	//of the step (U-B5 of the firmware review in erica-synths/lxr-desktop-app#3)
+	if((dest == 0) || (dest == NO_AUTOMATION))
+		return;
+
 	//(the step index is -1 while stopped)
 	if(seq_recordActive && seq_stepIndex[voice] >= 0)
 	{
@@ -2373,7 +2379,9 @@ void seq_recordAutomation(uint8_t voice, uint8_t dest, uint8_t value)
 		}
 	}
 
-	if( (seq_armedArmedAutomationStep	!= -1) && (seq_armedArmedAutomationTrack != -1) )
+	//(the held step and track are checked again: the lock 1/2 fallback below writes into the pattern)
+	if( (seq_armedArmedAutomationStep	!= -1) && (seq_armedArmedAutomationTrack != -1) &&
+			(seq_armedArmedAutomationStep < NUM_STEPS) && (seq_armedArmedAutomationTrack < NUM_TRACKS) )
 	{
 		//step button is held down
 		//-> set step automation parameters. A parameter keeps its lock, a new
