@@ -2340,6 +2340,11 @@ uint8_t seq_isAutomationStepArmed()
 //------------------------------------------------------------------------
 void seq_recordAutomation(uint8_t voice, uint8_t dest, uint8_t value)
 {
+	//0 and NO_AUTOMATION are no parameters: recorded, they only erased a lock
+	//of the step (U-B5 of the firmware review in erica-synths/lxr-desktop-app#3)
+	if((dest == 0) || (dest == NO_AUTOMATION))
+		return;
+
 	//(the step index is -1 while stopped)
 	if(seq_recordActive && seq_stepIndex[voice] >= 0)
 	{
@@ -2373,7 +2378,9 @@ void seq_recordAutomation(uint8_t voice, uint8_t dest, uint8_t value)
 		}
 	}
 
-	if( (seq_armedArmedAutomationStep	!= -1) && (seq_armedArmedAutomationTrack != -1) )
+	//(the held step and track are checked again: the lock 1/2 fallback below writes into the pattern)
+	if( (seq_armedArmedAutomationStep	!= -1) && (seq_armedArmedAutomationTrack != -1) &&
+			(seq_armedArmedAutomationStep < NUM_STEPS) && (seq_armedArmedAutomationTrack < NUM_TRACKS) )
 	{
 		//step button is held down
 		//-> set step automation parameters. A parameter keeps its lock, a new
