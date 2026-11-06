@@ -76,6 +76,8 @@ void voiceSettings_set(uint16_t paramNr, uint8_t value)
 		voiceFx_setAmount((uint8_t)(paramNr - PAR_VFX_AMT1), value);
 	else if((paramNr >= PAR_VFX_PAR1) && (paramNr <= PAR_VFX_PAR6))
 		voiceFx_setParam((uint8_t)(paramNr - PAR_VFX_PAR1), value);
+	else if((paramNr >= PAR_VFX_SEND1) && (paramNr <= PAR_VFX_SEND6))
+		voiceFx_setSend((uint8_t)(paramNr - PAR_VFX_SEND1), value);
 }
 
 //-----------------------------------------------------------------------

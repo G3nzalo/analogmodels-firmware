@@ -280,6 +280,7 @@ enum NamesEnum
 	TEXT_VFX_TONE,				// the third voice FX knob: tone of a distortion,
 	TEXT_VFX_TIME,				// time of the compressor,
 	TEXT_VFX_FREQ,				// frequency of the ring modulator
+	TEXT_VFX_SEND,				// send to the FX bus
 
 
 	NUM_NAMES
@@ -392,7 +393,8 @@ enum shortNamesEnum
 	SHORT_SHIFT,
 	SHORT_CHAR,
 	SHORT_SCALE,
-	SHORT_VFX
+	SHORT_VFX,
+	SHORT_SEND
 
 	
 };
@@ -524,7 +526,8 @@ enum longNamesEnum
 	LONG_FLAM,
 	LONG_SHIFT,
 	LONG_CHAR,
-	LONG_SCALE
+	LONG_SCALE,
+	LONG_SEND
 	
 };
 

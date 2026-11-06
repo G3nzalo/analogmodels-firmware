@@ -11,7 +11,8 @@
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
  *
  * Modified 2026 for a custom firmware (not an official Erica Synths release):
- * each voice runs its voice FX (VoiceFx.c) before it goes to its output.
+ * each voice runs its voice FX (VoiceFx.c) and its send to the FX bus before
+ * it goes to its output.
  */
 
 #include "Soundengine/DSPAudio/mixer.h"
@@ -607,7 +608,7 @@ IN_ITCM_RAM void mixer_calcNextSampleBlock(int16_t* output,int16_t* output2)
 	//decimate voice
 	mixer_decimateBlock(0,sampleData);
 	//voice FX (custom firmware)
-	voiceFx_process(0,sampleData,OUTPUT_DMA_SIZE);
+	voiceFx_process(0,sampleData,OUTPUT_DMA_SIZE,fxBusData,voiceArray[0].triggeredPanL,voiceArray[0].triggeredPanR);
 	//copy to selected dma buffer
 #if USE_SQRT_LUT
 	mixer_addDataToOutput(mixer_audioRouting[0],squareRootLut[127-voiceArray[0].pan] ,squareRootLut[voiceArray[0].pan], sampleData,&output[pos],&output[pos+1],&output2[pos],&output2[pos+1], fxBusData);
@@ -634,7 +635,7 @@ IN_ITCM_RAM void mixer_calcNextSampleBlock(int16_t* output,int16_t* output2)
 	//decimate voice
 	mixer_decimateBlock(1,sampleData);
 	//voice FX (custom firmware)
-	voiceFx_process(1,sampleData,OUTPUT_DMA_SIZE);
+	voiceFx_process(1,sampleData,OUTPUT_DMA_SIZE,fxBusData,voiceArray[1].triggeredPanL,voiceArray[1].triggeredPanR);
 	//copy to selected dma buffer
 #if USE_SQRT_LUT
 	mixer_addDataToOutput(mixer_audioRouting[1],squareRootLut[127-voiceArray[1].pan] ,squareRootLut[voiceArray[1].pan], sampleData,&output[pos],&output[pos+1],&output2[pos],&output2[pos+1], fxBusData);
@@ -656,7 +657,7 @@ IN_ITCM_RAM void mixer_calcNextSampleBlock(int16_t* output,int16_t* output2)
 	//decimate voice
 	mixer_decimateBlock(2,sampleData);
 	//voice FX (custom firmware)
-	voiceFx_process(2,sampleData,OUTPUT_DMA_SIZE);
+	voiceFx_process(2,sampleData,OUTPUT_DMA_SIZE,fxBusData,voiceArray[2].triggeredPanL,voiceArray[2].triggeredPanR);
 	//copy to selected dma buffer
 #if USE_SQRT_LUT
 	mixer_addDataToOutput(mixer_audioRouting[2],squareRootLut[127-voiceArray[2].pan] ,squareRootLut[voiceArray[2].pan], sampleData,&output[pos],&output[pos+1],&output2[pos],&output2[pos+1], fxBusData);
@@ -677,7 +678,7 @@ IN_ITCM_RAM void mixer_calcNextSampleBlock(int16_t* output,int16_t* output2)
 	//decimate voice
 	mixer_decimateBlock(3,sampleData);
 	//voice FX (custom firmware)
-	voiceFx_process(3,sampleData,OUTPUT_DMA_SIZE);
+	voiceFx_process(3,sampleData,OUTPUT_DMA_SIZE,fxBusData,snareVoice.triggeredPanL,snareVoice.triggeredPanR);
 	//copy to selected dma buffer
 #if USE_SQRT_LUT
 	mixer_addDataToOutput(mixer_audioRouting[3],squareRootLut[127-snareVoice.pan], squareRootLut[snareVoice.pan], sampleData,&output[pos],&output[pos+1],&output2[pos],&output2[pos+1], fxBusData);
@@ -694,7 +695,7 @@ IN_ITCM_RAM void mixer_calcNextSampleBlock(int16_t* output,int16_t* output2)
 	//decimate voice
 	mixer_decimateBlock(4,sampleData);
 	//voice FX (custom firmware)
-	voiceFx_process(4,sampleData,OUTPUT_DMA_SIZE);
+	voiceFx_process(4,sampleData,OUTPUT_DMA_SIZE,fxBusData,cymbalVoice.triggeredPanL,cymbalVoice.triggeredPanR);
 	//copy to selected dma buffer
 #if USE_SQRT_LUT
 	mixer_addDataToOutput(mixer_audioRouting[4],squareRootLut[127-cymbalVoice.pan],	squareRootLut[cymbalVoice.pan], sampleData,&output[pos],&output[pos+1],&output2[pos],&output2[pos+1], fxBusData);
@@ -712,7 +713,7 @@ IN_ITCM_RAM void mixer_calcNextSampleBlock(int16_t* output,int16_t* output2)
 	//decimate voice
 	mixer_decimateBlock(5,sampleData);
 	//voice FX (custom firmware)
-	voiceFx_process(5,sampleData,OUTPUT_DMA_SIZE);
+	voiceFx_process(5,sampleData,OUTPUT_DMA_SIZE,fxBusData,hatVoice.triggeredPanL,hatVoice.triggeredPanR);
 	//copy to selected dma buffer
 #if USE_SQRT_LUT
 	mixer_addDataToOutput(mixer_audioRouting[5],squareRootLut[127-hatVoice.pan],squareRootLut[hatVoice.pan], sampleData,&output[pos],&output[pos+1],&output2[pos],&output2[pos+1], fxBusData);

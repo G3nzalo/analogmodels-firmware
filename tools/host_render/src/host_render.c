@@ -18,6 +18,9 @@
  *                            like the sequencer plays a step with locks
  *   len <sec>                length of the next render
  *   stereo 0|1               mono (default) or stereo with the kit's pan
+ *   fxbus 0|1                1: the FX bus too, like the mixer: the voices'
+ *                            sends and the voices routed to FX go through the
+ *                            kit's FX (default 0: no FX bus, every voice dry)
  *   out <file.wav>           render the queued hits and write a 16 bit WAV
  *
  * Part of a custom firmware for the Erica Synths LXR-02 (not an official
@@ -48,6 +51,8 @@
 #include "menu/modelPresets.h"
 #include "Soundengine/DSPAudio/VoiceSettings.h"
 #include "Soundengine/DSPAudio/VoiceFx.h"
+#include "Soundengine/DSPAudio/mixer.h"
+#include "Soundengine/FxBus.h"
 #include "param_names.h"
 
 #ifndef CC_2
@@ -67,6 +72,7 @@ static AutomationNode lockNodes[7][MAX_LOCKS];
 static int numHits = 0;
 static double renderLen = 2.0;
 static int stereo = 0;
+static int fxbusOn = 0;
 
 static int paramIndex(const char *s)
 {
@@ -135,6 +141,7 @@ static void engineInit(void)
 	Snare_init();
 	HiHat_init();
 	Cymbal_init();
+	FxBus_init();
 	for (int i = 0; i < 7; i++) for (int k = 0; k < MAX_LOCKS; k++) autoNode_init(&lockNodes[i][k]);
 }
 
@@ -178,6 +185,7 @@ static void renderBlock(float *outL, float *outR)
 	HiHat_calcAsync();
 
 	int16_t buf[BLOCK];
+	int16_t fxBus[BLOCK * 2] = {0};
 	for (int v = 0; v < 6; v++) {
 		uint8_t pan;
 		switch (v) {
@@ -186,12 +194,29 @@ static void renderBlock(float *outL, float *outR)
 		case 4: Cymbal_calcSyncBlock(buf, BLOCK); pan = cymbalVoice.pan; break;
 		default: HiHat_calcSyncBlock(buf, BLOCK); pan = hatVoice.pan; break;
 		}
-		voiceFx_process((uint8_t)v, buf, BLOCK);
 		float gl = 1.f, gr = 1.f;
 		if (stereo) { gl = sqrtf((127 - pan) / 127.f); gr = sqrtf(pan / 127.f); }
+		voiceFx_process((uint8_t)v, buf, BLOCK, fxBus, gl, gr);
+		if (fxbusOn && mixer_audioRouting[v] == MIXER_ROUTING_FX_BUS) {
+			for (int i = 0; i < BLOCK; i++) {
+				int32_t l = fxBus[2 * i] + (int32_t)(buf[i] * gl), r = fxBus[2 * i + 1] + (int32_t)(buf[i] * gr);
+				fxBus[2 * i] = (int16_t)(l > 32767 ? 32767 : l < -32768 ? -32768 : l);
+				fxBus[2 * i + 1] = (int16_t)(r > 32767 ? 32767 : r < -32768 ? -32768 : r);
+			}
+			continue;
+		}
 		for (int i = 0; i < BLOCK; i++) {
 			outL[i] += buf[i] * gl;
 			outR[i] += buf[i] * gr;
+		}
+	}
+	if (fxbusOn) {
+		/* FxBus_process() adds the FX to one of the two stereo outputs */
+		int16_t o1[BLOCK * 2] = {0}, o2[BLOCK * 2] = {0};
+		FxBus_process(fxBus, &o1[0], &o1[1], &o2[0], &o2[1], BLOCK);
+		for (int i = 0; i < BLOCK; i++) {
+			outL[i] += o1[2 * i] + o2[2 * i];
+			outR[i] += o1[2 * i + 1] + o2[2 * i + 1];
 		}
 	}
 }
@@ -317,6 +342,7 @@ int main(int argc, char **argv)
 		}
 		else if (!strcmp(cmd, "len")) renderLen = atof(a);
 		else if (!strcmp(cmd, "stereo")) stereo = atoi(a);
+		else if (!strcmp(cmd, "fxbus")) fxbusOn = atoi(a);
 		else if (!strcmp(cmd, "fader")) host_faderVolume[atoi(a)] = (float)atof(b);
 		else if (!strcmp(cmd, "out")) render(a);
 		else { fprintf(stderr, "unknown command: %s\n", cmd); return 1; }

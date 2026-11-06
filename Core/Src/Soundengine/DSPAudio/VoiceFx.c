@@ -13,6 +13,7 @@
  *   to open).
  * - rng ring modulator: amount mixes the ring modulated signal in, frequency
  *   is the carrier (30 Hz to 6 kHz).
+ * The send to the FX bus follows the FX, with a squared taper (64 is -12 dB).
  * Nothing here runs from ITCM.
  *
  * Part of a custom firmware for the Erica Synths LXR-02 (not an official
@@ -26,6 +27,7 @@
 
 #include "Soundengine/DSPAudio/VoiceFx.h"
 #include "Soundengine/DSPAudio/VoiceSettings.h"
+#include "Soundengine/DSPAudio/mixer.h"
 #include "Soundengine/config.h"
 #include <math.h>
 
@@ -38,6 +40,7 @@ typedef struct
 	uint8_t		type;		// VFX_OFF .. VFX_RING
 	float		amt;		// amount [0:1]
 	float		par;		// time, tone or frequency [0:1]
+	float		send;		// gain of the send to the FX bus
 	// compressor
 	float		env;		// level detector
 	// distortion
@@ -66,6 +69,13 @@ void voiceFx_setParam(uint8_t voice, uint8_t value)
 {
 	if(voice > 5) return;
 	voiceFx[voice].par = (value > 127 ? 127 : value) * (1.f / 127.f);
+}
+
+void voiceFx_setSend(uint8_t voice, uint8_t value)
+{
+	if(voice > 5) return;
+	const float s = (value > 127 ? 127 : value) * (1.f / 127.f);
+	voiceFx[voice].send = s * s;
 }
 
 //-----------------------------------------------------------------------
@@ -227,7 +237,20 @@ static void voiceFx_ring(VoiceFxState* s, int16_t* buf, const uint8_t size)
 }
 
 //-----------------------------------------------------------------------
-void voiceFx_process(uint8_t voice, int16_t* buf, uint8_t size)
+static void voiceFx_send(const VoiceFxState* s, const int16_t* buf, const uint8_t size, int16_t* fxBus, const float panL, const float panR)
+{
+	const float gl = s->send * panL, gr = s->send * panR;
+	for(uint8_t i = 0; i < size; i++)
+	{
+		int32_t l = fxBus[2 * i] + (int32_t)(buf[i] * gl);
+		int32_t r = fxBus[2 * i + 1] + (int32_t)(buf[i] * gr);
+		fxBus[2 * i] = (int16_t)(l > 32767 ? 32767 : (l < -32768 ? -32768 : l));
+		fxBus[2 * i + 1] = (int16_t)(r > 32767 ? 32767 : (r < -32768 ? -32768 : r));
+	}
+}
+
+//-----------------------------------------------------------------------
+void voiceFx_process(uint8_t voice, int16_t* buf, uint8_t size, int16_t* fxBus, float panL, float panR)
 {
 	if(voice > 5) return;
 	VoiceFxState* s = &voiceFx[voice];
@@ -249,4 +272,6 @@ void voiceFx_process(uint8_t voice, int16_t* buf, uint8_t size)
 		s->env = s->lp = s->dcX = s->dcY = 0.f;
 		break;
 	}
+	if((s->send > 0.f) && (mixer_audioRouting[voice] != MIXER_ROUTING_FX_BUS))
+		voiceFx_send(s, buf, size, fxBus, panL, panR);
 }
