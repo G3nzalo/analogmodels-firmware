@@ -7,7 +7,8 @@
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
  *
  * Modified 2026 for a custom firmware (not an official Erica Synths release):
- * the names of the PWM knob while an 808/909 instrument runs.
+ * the names of the PWM knob while an 808/909 instrument runs, the kit
+ * extension's array and the names of the scale and voice FX knobs.
  */
 
 //---------------------------------------------------

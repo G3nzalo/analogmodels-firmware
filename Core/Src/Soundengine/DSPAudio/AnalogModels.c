@@ -813,8 +813,8 @@ static void model_modal(ModelState* s, float* out, const uint8_t n, const ModelC
 
 //-----------------------------------------------------------------------
 // Gamelan. SRN saron: a thick bronze bar on a box, struck with a hard mallet;
-// its modes after measured saron spectra (W. A. Sethares, "Tuning, Timbre,
-// Spectrum, Scale"). GND gender: thin keys over tube resonators, padded
+// inharmonic modes like those of a thick bar, the strongest upper one at
+// about 2.76 times the fundamental. GND gender: thin keys over tube resonators, padded
 // mallets, played as the Balinese pair pengumbang and pengisep whose small
 // detuning beats (ombak). BNG bonang: a small bossed kettle gong, its
 // fundamental split into a slow beating doublet.
@@ -944,7 +944,7 @@ static const ModalDef taikoRim =
 // GNG: gong ageng, the large bossed gong. Its two strongest modes are nearly,
 // but not exactly, an octave apart. The gong's nonlinearity makes an octave of
 // the fundamental that beats with the second mode a few times per second
-// (B. J. Krueger, K. L. Gee, D. W. Grimshaw, JASA 128, EL8, 2010), and the
+// (the mechanism measured by Krueger, Gee and Grimshaw, JASA 128, EL8, 2010), and the
 // second mode builds up over the first half second. Asymmetric modes above
 // them, and a padded beater.
 //-----------------------------------------------------------------------

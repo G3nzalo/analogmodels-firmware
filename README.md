@@ -2,8 +2,8 @@
 
 This is a **modified version** of the LXR-02 desktop firmware 1.7 published by Erica Synths. It is
 **not an official Erica Synths release** and Erica Synths provides no support for it. The boot
-screen shows `AnalogModels 0.4` / `custom FW V 1.7`, and the update file is
-`LXR_AnalogModels_V0.4.img`.
+screen shows `AnalogModels 0.5` / `custom FW V 1.7`, and the update file is
+`LXR_AnalogModels_V0.5.img`.
 
 ## What it adds
 
@@ -70,6 +70,70 @@ example kits takes 87k to 104k instructions (88k with the init kit), the worst c
 six voices with the compressor FX) 194k. The budget is about 313k cycles per block. The code is in
 `Core/Src/Soundengine/DSPAudio/AnalogModels.c`, the voice settings in `Core/Src/menu/modelPresets.c`.
 
+### Acoustic instruments: gamelan, hand drums and taiko (version 0.5)
+
+13 more instruments follow `RD9` in the **Waveform** lists. They are modal models: every mode of
+the bar, kettle, gong, skin or wood is a decaying sine at its own ratio, level and decay, struck by
+a short burst of noise shaped like the mallet, stick or hand; soft hits have fewer upper modes.
+They set up their voice when chosen, like the 808/909 instruments, and their decay, tuning,
+saturator and velocity work the same way.
+
+| Waveform | Instrument | Coarse 0 |
+|---|---|---|
+| `SRN` | saron: a thick bronze bar, hard mallet | C5 |
+| `GND` | gender: thin keys over resonators, padded mallets, played as the Balinese pair whose detuning beats 5.5 times per second (ombak) | C4 |
+| `BNG` | bonang: a small bossed kettle gong, its fundamental a slowly beating doublet | C5 |
+| `GNG` | gong ageng: two main modes nearly an octave apart; the gong's nonlinearity makes an octave of the fundamental that beats with the second mode about 2.3 times per second, and the second mode builds up after the hit. Rings 10 s at its preset decay | C2 |
+| `DJB` `DJT` `DJS` | djembe bass (the Helmholtz resonance of the goblet), tone and slap | 70 Hz, 380 Hz |
+| `CGO` `CGS` | conga open tone and slap | 250 Hz |
+| `ODK` | odaiko, the big taiko: its pitch starts higher and settles, more on hard hits | 49 Hz |
+| `NGD` | nagado-daiko | 98 Hz |
+| `SHM` | shime-daiko, small and laced tight | 420 Hz |
+| `TKR` | the bachi on the wooden rim ("ka") | 1.2 kHz |
+
+The modes of the skins are those of an ideal circular membrane, shifted by the air in the drum; the
+beating of the gong is the mechanism Krueger, Gee and Grimshaw measured on a large gamelan gong
+(JASA 128, EL8, 2010). On a drum voice they take 16k to 24k instructions per block (`CY8`, still
+the most expensive, 31k).
+
+### Slendro and pelog (version 0.5)
+
+The oscillator page of every voice has a new setting, **`scl`**: `12` (semitones, as before), `sln`
+(slendro) or `plg` (pelog). With a gamelan scale the notes of the steps, of MIDI and of the coarse
+knob walk through the five tones of slendro or the seven of pelog instead of the twelve semitones:
+from coarse 0 one step up is the next tone of the scale, five (or seven) steps up the next octave.
+It works on every waveform. Fine tuning stays in cents on top. Every gamelan has its own tuning;
+these are typical Javanese ones, in cents from the first tone, with the slightly wide octave of
+gamelans:
+
+| Scale | Tones (cents) | Octave |
+|---|---|---|
+| slendro | 0, 243, 486, 724, 977 | 1208 |
+| pelog | 0, 120, 258, 539, 675, 785, 943 | 1206 |
+
+### Voice FX (version 0.5)
+
+The filter page of every voice has four more knobs (5 to 8) for an effect on that voice only, at its
+end (after filter, drive and sample rate reduction), besides the one FX all voices share:
+
+| `vfx` | Amount (`amt`) | Third knob |
+|---|---|---|
+| `cmp` compressor | threshold 0 to -40 dB and ratio 1:1 to 10:1, with make-up gain and a soft limit | `tim`: attack and release, 0.1 ms / 30 ms to 5 ms / 600 ms |
+| `tub` tube, `fld` wavefolder, `clp` clipper | drive, up to +24 dB | `ton`: a low pass after it, 1 kHz to open |
+| `rng` ring modulator | how much of it | `frq`: the carrier, 30 Hz to 6 kHz |
+
+The voice's volume and fader come after the effect, so its threshold and drive stay where they are
+at any volume. The fourth knob, **`snd`**, sends the voice (after its effect, panned like it) to the
+shared FX while it keeps playing on its own output: with the FX's `d/w` at 127 the shared delay
+becomes a send effect (64 is -12 dB, 127 is 0 dB). A voice routed to `FX` on its MIX page goes there
+whole, as before. With an effect on every voice and their sends on top of the worst case above, an
+audio block takes up to 231k instructions.
+
+The scale and the voice FX are saved with the kit, behind its parameters in the kit file; the
+official firmware and older versions ignore them, and kits without them load with semitones and the
+voice FX off. They cannot be locked on a step (turning them while holding a step changes the kit)
+and have no MIDI CC.
+
 ### Up to 8 parameter locks per step
 
 Select the voice and a page (for example the filter page), hold a step button, turn knobs and
@@ -102,8 +166,9 @@ one, holding a step changed the track that realtime recording writes into, a ste
 got a second lock for the same parameter, and a knob without a parameter used up a lock.
 
 The lock handling is checked by PC tests that run the real menu, button, sequencer, sound engine
-and preset manager code (`tools/host_render/test`: 79 checks for holding steps, playing and
-recording locks, 36 for saving and loading patterns, including files of the original firmware).
+and preset manager code (`tools/host_render/test`: 86 checks for holding steps, playing and
+recording locks and the new knobs, 50 for saving and loading patterns and kits, including files of
+the original firmware).
 
 ### Fixes of the stock firmware (version 0.4)
 
@@ -144,7 +209,7 @@ card during an access hangs the unit.
 
 ## Example kits and patterns
 
-The SD-card project `proj60` ("AnalogMd") has these kits in kit slots 0 to 4, each with a demo
+The SD-card project `proj60` ("AnalogMd") has these kits in kit slots 0 to 7, each with a demo
 pattern in the same pattern slot:
 
 | Slot | Kit | Contents |
@@ -154,6 +219,9 @@ pattern in the same pattern slot:
 | 2 | `Perc808` | the three congas, claves, cowbell and maracas |
 | 3 | `Bateria` | `BD9`, floor tom `LT9`, ride `RD9`, `SD9`, crash `CR9` and `HH9`; the 2-bar pattern has ghost snares and a tom fill from the floor tom voice |
 | 4 | `LockDemo` | a snare on drum 2: normal, filter opened a bit, longer amp decay, filter closed and short; the kick changes its sound on every beat, with 8 locks on beat 4 |
+| 5 | `Gamelan` | in slendro: gong ageng, bonang, saron, gender, a kenong (the bonang an octave down) and the kendhang (djembe tones on the hat voice); the saron plays the balungan 2 1 2 6 3 5 3 2, the gong ends the cycle; a delay sent from bonang, saron and gender |
+| 6 | `Djembe` | djembe bass, tone and slap, two congas (by the step note) and a bell; a compressor on the bass, tube on the open congas |
+| 7 | `Taiko` | odaiko, two nagado-daiko, shime, the rim and a small bell (the bonang high and short); compressor on the odaiko, tube on the nagados, a long delay sent from the big drums |
 
 They are generated with the PC render tool in `tools/host_render`, which runs the real firmware DSP
 code on a computer.
@@ -161,7 +229,8 @@ code on a computer.
 Known limitations:
 
 - The instruments ignore FM input, and the transient page's `Ofs` mode has no effect on them (`Snp`
-  and the sample clicks work).
+  and the sample clicks work). On the snare voice the filter only works on the voice's noise, not on
+  the instrument.
 - The step page shows only lock 1 and 2 of a step.
 - Tested on an LXR-02 (installing the update, playing the instruments, locks and saturator, saving
   and loading projects) and on a PC: rendering the firmware's voice code (including a check that
