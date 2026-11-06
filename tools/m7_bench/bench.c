@@ -168,11 +168,12 @@ int main(void)
 		printf("%s  %6.0f instructions/block\n", cases[c].name, benchVoice(cases[c].voice, N));
 	}
 
-	/* every 808/909 instrument with its voice settings on a drum voice, the
+	/* every instrument with its voice settings on a drum voice, the
 	 * snare, the cymbal and the hat voice */
 	static const char* const modelNames[NUM_ANALOG_MODELS] = { "BD8", "BD9", "SD8", "SD9", "LT8", "MT8",
 		"HT8", "LT9", "MT9", "HT9", "LC8", "MC8", "HC8", "RS8", "RS9", "CL8", "CP8", "CP9", "MA8", "CB8",
-		"HH8", "HH9", "CY8", "CR9", "RD9" };
+		"HH8", "HH9", "CY8", "CR9", "RD9", "SRN", "GND", "BNG", "GNG", "DJB", "DJT", "DJS", "CGO", "CGS",
+		"ODK", "NGD", "SHM", "TKR" };
 	static const int benchVoices[4] = { 0, 3, 4, 5 };
 	printf("instrument   drum  snare    cym    hat (instructions/block)\n");
 	int worst = MODEL_BD8;
