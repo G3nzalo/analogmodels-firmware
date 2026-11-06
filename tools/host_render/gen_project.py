@@ -89,6 +89,8 @@ def pattern_bytes(name, hits, kit_nr, length=16, nums=None):
         trk, step, vel = hit[:3]
         st = steps[trk][step]
         st[0] = (vel & 0x7F) | STEP_ACTIVE
+        if len(hit) > 4:
+            st[2] = hit[4]                    # the step's note
         main[trk][step // 16] |= 1 << (step % 16)
         # up to 8 parameter locks: lock 1 and 2 in the step, the others in the pool
         locks = hit[3] if len(hit) > 3 else ()
@@ -126,8 +128,9 @@ def main():
         os.remove(os.path.join(folder, f))
     open(os.path.join(folder, "prj.nfo"), "wb").write(name8("AnalogMd"))
 
-    order = ["808", "909", "PERC", "BAT", "LOCK"]
-    pattern_names = {"808": "808Groov", "909": "909Groov", "PERC": "PercGroo", "BAT": "BatRock", "LOCK": "LockDemo"}
+    order = ["808", "909", "PERC", "BAT", "LOCK", "GAM", "DJE", "TAI"]
+    pattern_names = {"808": "808Groov", "909": "909Groov", "PERC": "PercGroo", "BAT": "BatRock", "LOCK": "LockDemo",
+                     "GAM": "GamelanG", "DJE": "DjembeGr", "TAI": "TaikoGro"}
     init = init_kit_params()
     nums = param_numbers()
     for slot in range(SLOTS):
