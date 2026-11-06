@@ -23,12 +23,13 @@ STM32 HAL with just enough for the DSP code to compile on a PC; the PC runs with
 like the STM32. `src/param_names.h` is generated from `Core/Inc/Parameters.h` by `gen_param_names.py`.
 
 `test/` has two tests. `plock_test` checks the step parameter locks (hold a step, turn knobs,
-release, play; up to eight locks per step, a full lock pool, recording while playing) and choosing
-an 808/909 instrument. It builds the real menu, button handler, CortexParser, sequencer and sound
+release, play; up to eight locks per step, a full lock pool, recording while playing), choosing
+an instrument, and the scale and voice FX knobs (no locks). It builds the real menu, button handler, CortexParser, sequencer and sound
 engine code with the hardware stubbed out (`src/ui_stubs.c`). `patfile_test` saves and loads
 patterns with the real `presetManager.c` on a folder of the PC (`test/ff_stdio.c` stands in for
 FatFs): pattern files and `tmp.pat` with up to eight locks per step, files of the original
-firmware, a broken lock list, copy and clear. Built against the original firmware's `Core/` it
+firmware, a broken lock list, copy and clear; kit files and `tmp.snd` with the kit extension
+(per-voice scale and voice FX), old and damaged ones. Built against the original firmware's `Core/` it
 writes the same pattern, so the files can be compared (the new ones only add the lock list):
 
 ```sh

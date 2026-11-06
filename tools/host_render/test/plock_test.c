@@ -25,6 +25,9 @@
 #include "Preset/InitKit.h"
 #include "Soundengine/DSPAudio/AnalogModels.h"
 #include "Soundengine/DSPAudio/ResonantFilter.h"
+#if __has_include("Soundengine/DSPAudio/VoiceSettings.h")
+#include "Soundengine/DSPAudio/VoiceSettings.h"
+#endif
 
 extern uint8_t frontParser_activeTrack;
 extern uint8_t seq_recordActive;
@@ -401,6 +404,33 @@ int main(void)
 		CHECK(midiParser_originalCcValues[0] == 5, "CC 0 stays inside the CC value table (%d)", midiParser_originalCcValues[0]);
 		seq_setMainStep(seq_activePattern, SNARE, R, 0);
 	}
+
+#ifdef NUM_KIT_EXT
+	printf("\n13) the scale and the voice FX of a voice (kit extension)\n");
+	selectVoice(0);
+	activeParameters[PAR_SCALE1] = 0;
+	turn(SUB_OSC, 4, +1);	/* knob 5 of the oscillator page */
+	CHECK(activeParameters[PAR_SCALE1] == SCALE_SLENDRO && voiceArray[0].osc.scale == SCALE_SLENDRO, "scl: slendro in the menu and the engine");
+	turn(SUB_OSC, 4, +5);
+	CHECK(activeParameters[PAR_SCALE1] == SCALE_PELOG && voiceArray[0].osc.scale == SCALE_PELOG, "pelog is the last one");
+	holdStep(3);
+	turn(SUB_OSC, 4, -2);
+	CHECK(numLocks(0, 3) == 0 && voiceArray[0].osc.scale == SCALE_12_TONES, "a held step: no lock, the scale changes for the kit");
+	turn(SUB_FILTER, 4, +2);	/* knob 5 of the filter page */
+	turn(SUB_FILTER, 5, +40);
+	turn(SUB_FILTER, 7, +64);
+	CHECK(numLocks(0, 3) == 0 && activeParameters[PAR_VFX_TYPE1] == VFX_TUBE && activeParameters[PAR_VFX_AMT1] == 40
+		&& activeParameters[PAR_VFX_SEND1] == 64, "voice FX tub, amount 40, send 64: no locks either");
+	releaseStep();
+	turn(SUB_FILTER, 4, +10);
+	CHECK(activeParameters[PAR_VFX_TYPE1] == VFX_RING, "rng is the last voice FX");
+	menu_switchSubPage(SUB_OSC, 0);
+	turn(SUB_OSC, 2, MODEL_GNG - activeParameters[PAR_OSC_WAVE_DRUM1]);
+	CHECK(voiceArray[0].osc.waveform == MODEL_GNG && activeParameters[PAR_VELOD1] == 120 && activeParameters[PAR_COARSE1] == 60,
+		"the gong ageng brings its voice settings too (dec %d)", activeParameters[PAR_VELOD1]);
+	turn(SUB_OSC, 2, +100);
+	CHECK(activeParameters[PAR_OSC_WAVE_DRUM1] == MODEL_END - 1, "the waveform list ends with TKR (%d)", activeParameters[PAR_OSC_WAVE_DRUM1]);
+#endif
 
 	printf("\n%d of %d checks passed\n", checks - fails, checks);
 	return fails ? 1 : 0;

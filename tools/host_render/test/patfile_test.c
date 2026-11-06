@@ -2,7 +2,8 @@
  * patfile_test.c - PC test of the pattern files with the extra parameter
  * locks: the real presetManager.c saves and loads patterns (pattern files and
  * tmp.pat) on a folder of the PC (ff_stdio.c). Also builds against the
- * original firmware (no lock pool), to compare the files both write.
+ * original firmware (no lock pool), to compare the files both write. And the
+ * kit files and tmp.snd with the kit extension (per-voice settings).
  * usage: patfile_test <empty folder>
  *        patfile_test dump <folder> <pattern slot>   prints the locks of a pattern file
  * PC only, not part of the firmware.
@@ -19,11 +20,17 @@
 #include "Soundengine/MIDI/MidiMessages.h"
 #include "Preset/PresetManager.h"
 #include "menu/menu.h"
+#ifdef __has_include
+#if __has_include("Soundengine/DSPAudio/VoiceSettings.h")
+#include "Soundengine/DSPAudio/VoiceSettings.h"
+#endif
+#endif
 
 extern const char* ffhost_root;
 extern char savefileNames[NUM_KIT_SLOTS][NUM_SAVEFILE_NAMES][8];
 FRESULT preset_saveTmpPat(void);
 FRESULT preset_LoadTmpPat(void);
+FRESULT preset_saveTmpKit(void);
 
 static int fails = 0, checks = 0;
 #define CHECK(cond, ...) do { checks++; if (cond) printf("  ok    "); else { printf("  FAIL  "); fails++; } \
@@ -134,6 +141,18 @@ static int truncate_file(const char* dir, const char* name, long len)
 	char p[512];
 	snprintf(p, sizeof p, "%s/%s", dir, name);
 	return truncate(p, len);
+}
+
+/* writes a kit file: name, parameters and what follows them */
+static void writeKit(const char* dir, const char* name, const uint8_t* params, const uint8_t* tail, size_t tailLen)
+{
+	char p[512];
+	snprintf(p, sizeof p, "%s/%s", dir, name);
+	FILE* f = fopen(p, "wb");
+	fwrite("KitTest\0", 1, 8, f);
+	fwrite(params, 1, END_OF_SOUND_PARAMETERS, f);
+	if (tailLen) fwrite(tail, 1, tailLen, f);
+	fclose(f);
 }
 
 static long fileSize(const char* dir, const char* name)
@@ -312,7 +331,82 @@ int main(int argc, char** argv)
 	seq_clearPattern(9);
 	CHECK(seq_getLockPool(9)->count == 0 && numLocks(9, 0, 0) == 0, "clear pattern: no locks");
 
-	printf("\n7) files to compare with the original firmware's\n");
+#ifdef NUM_KIT_EXT
+	printf("\n7) kit files and tmp.snd with the kit extension\n");
+	{
+		const uint8_t K = 5;
+		const char* kitFile = "05-KitTe.snd";	/* the slot and the first 5 letters of the name */
+		uint8_t params[END_OF_SOUND_PARAMETERS], want[NUM_KIT_EXT], defaults[NUM_KIT_EXT];
+		for (int i = 0; i < END_OF_SOUND_PARAMETERS; i++) params[i] = (uint8_t)((i * 7) % 128);
+		for (int v = 0; v < 6; v++) {
+			want[PAR_SCALE1 - PAR_BEGINNING_OF_KIT_EXT + v] = (uint8_t)(v % NUM_SCALES);
+			want[PAR_VFX_TYPE1 - PAR_BEGINNING_OF_KIT_EXT + v] = (uint8_t)(v % NUM_VFX);
+			want[PAR_VFX_AMT1 - PAR_BEGINNING_OF_KIT_EXT + v] = (uint8_t)(10 + v);
+			want[PAR_VFX_PAR1 - PAR_BEGINNING_OF_KIT_EXT + v] = (uint8_t)(100 + v);
+			want[PAR_VFX_SEND1 - PAR_BEGINNING_OF_KIT_EXT + v] = (uint8_t)(120 + v);
+		}
+		voiceSettings_defaults(defaults);
+		memcpy(savefileNames[K][KIT_NAMES], "KitTest", 8);
+		memcpy(mainParameters[K], params, sizeof params);
+		memcpy(mainKitExt[K], want, sizeof want);
+		CHECK(preset_saveDrumsetSD(K, 0) == FR_OK && fileSize(argv[1], kitFile) > 0, "kit %d saved (%s)", K, kitFile);
+		CHECK(fileSize(argv[1], kitFile) == 8 + END_OF_SOUND_PARAMETERS + 5 + NUM_KIT_EXT,
+			"name, %d parameters, then XKT1, the count and %d settings (%ld bytes)", END_OF_SOUND_PARAMETERS, NUM_KIT_EXT, fileSize(argv[1], kitFile));
+		memset(mainParameters[K], 0, END_OF_SOUND_PARAMETERS);
+		memset(mainKitExt[K], 0x55, NUM_KIT_EXT);
+		CHECK(preset_loadDrumsetSD(K, 0) == FR_OK, "loaded");
+		CHECK(!memcmp(mainParameters[K], params, sizeof params) && !memcmp(mainKitExt[K], want, sizeof want), "parameters and settings as saved");
+
+		preset_loadDrumsetRam(K, 0, 0);
+		CHECK(!memcmp(&activeParameters[PAR_BEGINNING_OF_KIT_EXT], want, sizeof want), "loading the kit makes them the current settings");
+		activeParameters[PAR_SCALE3] = SCALE_PELOG;
+		activeParameters[PAR_VFX_SEND2] = 77;
+		preset_saveDrumsetRam(K + 1, 0);
+		CHECK(mainKitExt[K + 1][PAR_SCALE3 - PAR_BEGINNING_OF_KIT_EXT] == SCALE_PELOG && mainKitExt[K + 1][PAR_VFX_SEND2 - PAR_BEGINNING_OF_KIT_EXT] == 77,
+			"saving the current kit to another slot takes them along");
+		morphParameters = mainParameters[0];	/* as main.c sets it */
+		preset_saveDrumsetRam(K + 2, 1);
+		CHECK(!memcmp(mainKitExt[K + 2], mainKitExt[K + 1], NUM_KIT_EXT), "a morphed kit gets the current settings");
+
+		writeKit(argv[1], kitFile, params, NULL, 0);
+		memset(mainKitExt[K], 0x55, NUM_KIT_EXT);
+		CHECK(preset_loadDrumsetSD(K, 0) == FR_OK && !memcmp(mainKitExt[K], defaults, NUM_KIT_EXT),
+			"a kit file of the original firmware: the default settings");
+
+		uint8_t tail[5 + 64];
+		memcpy(tail, "XKT1", 4); tail[4] = NUM_KIT_EXT; memcpy(tail + 5, want, 10);
+		writeKit(argv[1], kitFile, params, tail, 5 + 10);
+		CHECK(preset_loadDrumsetSD(K, 0) == FR_OK && !memcmp(mainKitExt[K], defaults, NUM_KIT_EXT),
+			"a cut off block: the default settings");
+
+		memcpy(tail + 5, want, NUM_KIT_EXT);
+		tail[5 + PAR_SCALE1 - PAR_BEGINNING_OF_KIT_EXT] = 9;
+		tail[5 + PAR_VFX_TYPE4 - PAR_BEGINNING_OF_KIT_EXT] = 200;
+		tail[5 + PAR_VFX_AMT6 - PAR_BEGINNING_OF_KIT_EXT] = 255;
+		writeKit(argv[1], kitFile, params, tail, 5 + NUM_KIT_EXT);
+		CHECK(preset_loadDrumsetSD(K, 0) == FR_OK && mainKitExt[K][PAR_SCALE1 - PAR_BEGINNING_OF_KIT_EXT] == SCALE_12_TONES
+			&& mainKitExt[K][PAR_VFX_TYPE4 - PAR_BEGINNING_OF_KIT_EXT] == VFX_OFF && mainKitExt[K][PAR_VFX_AMT6 - PAR_BEGINNING_OF_KIT_EXT] == 127
+			&& mainKitExt[K][PAR_VFX_SEND3 - PAR_BEGINNING_OF_KIT_EXT] == want[PAR_VFX_SEND3 - PAR_BEGINNING_OF_KIT_EXT],
+			"values out of range are corrected, the others kept");
+
+		memcpy(tail + 5, want, NUM_KIT_EXT);
+		memset(tail + 5 + NUM_KIT_EXT, 99, 10);
+		tail[4] = NUM_KIT_EXT + 10;
+		writeKit(argv[1], kitFile, params, tail, 5 + NUM_KIT_EXT + 10);
+		CHECK(preset_loadDrumsetSD(K, 0) == FR_OK && !memcmp(mainKitExt[K], want, NUM_KIT_EXT),
+			"a longer block of a later version: its first %d settings", NUM_KIT_EXT);
+
+		memcpy(&activeParameters[PAR_BEGINNING_OF_KIT_EXT], want, NUM_KIT_EXT);
+		CHECK(preset_saveTmpKit() == FR_OK && fileSize(argv[1], "tmp.snd") == 1 + END_OF_SOUND_PARAMETERS + 5 + NUM_KIT_EXT, "tmp.snd saved (%ld bytes)", fileSize(argv[1], "tmp.snd"));
+		memset(&activeParameters[PAR_BEGINNING_OF_KIT_EXT], 0, NUM_KIT_EXT);
+		CHECK(preset_LoadTmpKit() == FR_OK && !memcmp(&activeParameters[PAR_BEGINNING_OF_KIT_EXT], want, NUM_KIT_EXT), "tmp.snd loaded with the settings");
+
+		CHECK(preset_saveGlobals() == FR_OK && fileSize(argv[1], "glo.cfg") == END_OF_GLOBAL_PARAMETERS - PAR_BEGINNING_OF_GLOBALS,
+			"glo.cfg keeps its %d globals (%ld bytes)", END_OF_GLOBAL_PARAMETERS - PAR_BEGINNING_OF_GLOBALS, fileSize(argv[1], "glo.cfg"));
+	}
+#endif
+
+	printf("\n8) files to compare with the original firmware's\n");
 	fill(PAT, 0);
 	CHECK(preset_savePatternSD(PAT) == FR_OK, "pattern %d saved without extra locks", PAT);
 	menu_playedPattern = PAT;
