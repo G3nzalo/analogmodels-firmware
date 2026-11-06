@@ -844,6 +844,60 @@ static const ModalDef bonang =
 };
 
 //-----------------------------------------------------------------------
+// Hand drums. The modes of an ideal circular membrane (ratios of the Bessel
+// zeros) shifted by the air in the body, a short rise of the pitch at the
+// impact (the skin stretches) and the hand as the strike. DJB djembe bass:
+// the open hand in the middle sounds the Helmholtz resonance of the goblet
+// (65-80 Hz). DJT djembe tone: flat fingers at the edge, the (1,1) mode and
+// the ones around it (300-420 Hz). DJS djembe slap: relaxed fingers, a crack
+// of the higher modes and the fingers (700-1000 Hz and up). CGO conga open
+// tone, CGS conga slap.
+//-----------------------------------------------------------------------
+static const ModalDef djembeBass =
+{
+	70.f, 4,
+	{ { 1.f, 1.f, 1.f }, { 3.30f, 0.22f, 0.30f }, { 5.43f, 0.10f, 0.22f }, { 7.27f, 0.05f, 0.16f } },
+	0.f, 0.06f, 0.06f, 0.025f,
+	500.f, 1.4f, 0.006f, 0.45f, 0.5f
+};
+
+static const ModalDef djembeTone =
+{
+	380.f, 8,
+	{ { 1.f, 1.f, 1.f }, { 0.627f, 0.25f, 0.55f }, { 1.340f, 0.50f, 0.75f }, { 1.441f, 0.12f, 0.45f },
+	  { 1.665f, 0.30f, 0.55f }, { 1.831f, 0.16f, 0.45f }, { 1.980f, 0.14f, 0.40f }, { 0.184f, 0.14f, 0.90f } },
+	0.f, 0.02f, 0.03f, 0.02f,
+	2200.f, 1.0f, 0.003f, 0.20f, 0.5f
+};
+
+static const ModalDef djembeSlap =
+{
+	380.f, 8,
+	{ { 1.f, 0.45f, 0.55f }, { 1.340f, 0.55f, 0.50f }, { 1.665f, 0.60f, 0.45f }, { 1.980f, 0.55f, 0.40f },
+	  { 2.197f, 0.35f, 0.32f }, { 2.289f, 0.45f, 0.35f }, { 2.547f, 0.30f, 0.28f }, { 2.593f, 0.30f, 0.26f } },
+	0.f, 0.03f, 0.04f, 0.012f,
+	2800.f, 0.8f, 0.006f, 0.70f, 0.6f
+};
+
+static const ModalDef congaOpen =
+{
+	250.f, 7,
+	{ { 1.f, 1.f, 1.f }, { 1.52f, 0.40f, 0.60f }, { 1.99f, 0.30f, 0.50f }, { 2.45f, 0.16f, 0.38f },
+	  { 2.92f, 0.10f, 0.30f }, { 3.38f, 0.06f, 0.24f }, { 0.50f, 0.10f, 0.50f } },
+	0.f, 0.03f, 0.03f, 0.015f,
+	1500.f, 1.1f, 0.003f, 0.18f, 0.5f
+};
+
+static const ModalDef congaSlap =
+{
+	250.f, 8,
+	{ { 1.f, 0.40f, 0.50f }, { 1.52f, 0.50f, 0.45f }, { 1.99f, 0.55f, 0.40f }, { 2.45f, 0.50f, 0.35f },
+	  { 2.92f, 0.45f, 0.30f }, { 3.38f, 0.35f, 0.26f }, { 3.85f, 0.25f, 0.22f }, { 4.40f, 0.18f, 0.20f } },
+	0.f, 0.03f, 0.04f, 0.010f,
+	3200.f, 0.8f, 0.005f, 0.75f, 0.6f
+};
+
+//-----------------------------------------------------------------------
 // GNG: gong ageng, the large bossed gong. Its two strongest modes are nearly,
 // but not exactly, an octave apart. The gong's nonlinearity makes an octave of
 // the fundamental that beats with the second mode a few times per second
@@ -990,6 +1044,7 @@ static const float modelLevel[NUM_ANALOG_MODELS] =
 	1.393f, 1.132f, 0.430f, 0.774f,	// CP8 CP9 MA8 CB8
 	2.084f, 1.119f, 1.094f, 0.723f, 1.057f,	// HH8 HH9 CY8 CR9 RD9
 	0.586f, 0.440f, 0.476f, 0.499f,	// SRN GND BNG GNG
+	0.918f, 0.365f, 0.256f, 0.493f, 0.297f,	// DJB DJT DJS CGO CGS
 };
 
 //-----------------------------------------------------------------------
@@ -1045,6 +1100,11 @@ void model_calcBlock(OscInfo* osc, int16_t* buf, const uint8_t size, const float
 	case MODEL_GND:	model_modal(s, out, size, &c, &gender);	break;
 	case MODEL_BNG:	model_modal(s, out, size, &c, &bonang);	break;
 	case MODEL_GNG:	model_gng(s, out, size, &c);	break;
+	case MODEL_DJB:	model_modal(s, out, size, &c, &djembeBass);	break;
+	case MODEL_DJT:	model_modal(s, out, size, &c, &djembeTone);	break;
+	case MODEL_DJS:	model_modal(s, out, size, &c, &djembeSlap);	break;
+	case MODEL_CGO:	model_modal(s, out, size, &c, &congaOpen);	break;
+	case MODEL_CGS:	model_modal(s, out, size, &c, &congaSlap);	break;
 	default:
 		memset(buf, 0, size * sizeof(int16_t));
 		return;

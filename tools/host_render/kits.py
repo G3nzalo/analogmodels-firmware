@@ -18,7 +18,7 @@ import sys
 INSTRUMENTS = ["BD8", "BD9", "SD8", "SD9", "LT8", "MT8", "HT8", "LT9", "MT9", "HT9",
                "LC8", "MC8", "HC8", "RS8", "RS9", "CL8", "CP8", "CP9", "MA8", "CB8",
                "HH8", "HH9", "CY8", "CR9", "RD9",
-               "SRN", "GND", "BNG", "GNG"]
+               "SRN", "GND", "BNG", "GNG", "DJB", "DJT", "DJS", "CGO", "CGS"]
 W = {name: 6 + i for i, name in enumerate(INSTRUMENTS)}
 
 # the decay each instrument brings (menu/modelPresets.c), for waveform locks
@@ -26,7 +26,8 @@ DECAY = {"BD8": 65, "BD9": 47, "SD8": 26, "SD9": 32, "LT8": 44, "MT8": 37, "HT8"
          "LT9": 51, "MT9": 46, "HT9": 41, "LC8": 32, "MC8": 28, "HC8": 24, "RS8": 6,
          "RS9": 8, "CL8": 8, "CP8": 29, "CP9": 35, "MA8": 12, "CB8": 31, "HH8": 7,
          "HH9": 8, "CY8": 79, "CR9": 87, "RD9": 89,
-         "SRN": 84, "GND": 93, "BNG": 74, "GNG": 120}
+         "SRN": 84, "GND": 93, "BNG": 74, "GNG": 120, "DJB": 37, "DJT": 41, "DJS": 25,
+         "CGO": 49, "CGS": 22}
 
 # per voice 0..5: waveform, decay, coarse, saturator (PWM), volume, pan parameters
 WAVE = ["PAR_OSC_WAVE_DRUM1", "PAR_OSC_WAVE_DRUM2", "PAR_OSC_WAVE_DRUM3", "PAR_OSC_WAVE_SNARE",

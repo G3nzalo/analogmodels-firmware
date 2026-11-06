@@ -59,6 +59,11 @@ enum AnalogModelEnum
 	MODEL_GND,		/* gamelan gender, a pair with ombak */
 	MODEL_BNG,		/* gamelan bonang */
 	MODEL_GNG,		/* gamelan gong ageng */
+	MODEL_DJB,		/* djembe bass */
+	MODEL_DJT,		/* djembe tone */
+	MODEL_DJS,		/* djembe slap */
+	MODEL_CGO,		/* conga open tone */
+	MODEL_CGS,		/* conga slap */
 	MODEL_END
 };
 
