@@ -47,6 +47,7 @@
 #include "Soundengine/DSPAudio/automationNode.h"
 #include "menu/modelPresets.h"
 #include "Soundengine/DSPAudio/VoiceSettings.h"
+#include "Soundengine/DSPAudio/VoiceFx.h"
 #include "param_names.h"
 
 #ifndef CC_2
@@ -151,7 +152,8 @@ static void trigger(const Hit *h)
 	voiceControl_noteOn((uint8_t)h->voice, (uint8_t)h->note, (uint8_t)h->vel);
 }
 
-/* one 64 sample block of all six voices, like mixer_calcNextSampleBlock() without FX */
+/* one 64 sample block of all six voices, like mixer_calcNextSampleBlock() with
+ * the voice FX but without the sample rate reduction and the FX bus */
 static void renderBlock(float *outL, float *outR)
 {
 	modNode_resetTargets();
@@ -184,6 +186,7 @@ static void renderBlock(float *outL, float *outR)
 		case 4: Cymbal_calcSyncBlock(buf, BLOCK); pan = cymbalVoice.pan; break;
 		default: HiHat_calcSyncBlock(buf, BLOCK); pan = hatVoice.pan; break;
 		}
+		voiceFx_process((uint8_t)v, buf, BLOCK);
 		float gl = 1.f, gr = 1.f;
 		if (stereo) { gl = sqrtf((127 - pan) / 127.f); gr = sqrtf(pan / 127.f); }
 		for (int i = 0; i < BLOCK; i++) {

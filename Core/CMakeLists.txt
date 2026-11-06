@@ -68,6 +68,7 @@ add_library(lxr_dsp OBJECT
     Src/Soundengine/DSPAudio/1PoleLp.c
     Src/Soundengine/DSPAudio/AnalogModels.c
     Src/Soundengine/DSPAudio/VoiceSettings.c
+    Src/Soundengine/DSPAudio/VoiceFx.c
     Src/Soundengine/DSPAudio/automationNode.c
     Src/Soundengine/DSPAudio/BufferTools.c
     Src/Soundengine/DSPAudio/CymbalVoice.c

@@ -14,7 +14,7 @@
  * parameter keeps its lock, a knob without a parameter does nothing, and
  * clicking the encoder while a step is held clears that step's locks.
  * The kit extension (per-voice settings, see Parameters.h) goes straight to
- * the sound engine.
+ * the sound engine; the third knob of the voice FX is labelled by its type.
  * Also fixes from OpenElixir-02 by Moritz Waser (see the git history).
  */
 
@@ -267,6 +267,11 @@ const Name valueNames[NUM_NAMES] =
 		{SHORT_KCM, CAT_GLOBAL, LONG_PATTERN_MODE},/*TEXT_AUTO_SWITCH_KIT*/
 		{SHORT_CHAR, CAT_OSC, LONG_CHAR},/*TEXT_MODEL_CHAR*/
 		{SHORT_SCALE, CAT_OSC, LONG_SCALE},/*TEXT_SCALE*/
+		{SHORT_VFX, CAT_VFX, LONG_TYPE},/*TEXT_VFX_TYPE*/
+		{SHORT_AMNT, CAT_VFX, LONG_AMOUNT},/*TEXT_VFX_AMT*/
+		{SHORT_TONE, CAT_VFX, LONG_TONE},/*TEXT_VFX_TONE*/
+		{SHORT_TIME, CAT_VFX, LONG_TIME},/*TEXT_VFX_TIME*/
+		{SHORT_FREQ, CAT_VFX, LONG_FREQ},/*TEXT_VFX_FREQ*/
 
 
 };
@@ -1547,9 +1552,19 @@ static void menu_displayModTargetShort(uint8_t curParmVal, char *valueAsText, ch
 
 //-----------------------------------------------------------------
 // The PWM knob is the tube saturator of the 808/909 instruments, so it is
-// labelled "sat" while the voice's oscillator runs one of them.
+// labelled "sat" while the voice's oscillator runs one of them. The third
+// knob of the voice FX is the time of the compressor, the tone of the
+// distortions and the frequency of the ring modulator.
 static uint8_t menu_textForParam(const uint8_t textId, const uint16_t parNr)
 {
+	if((textId == TEXT_VFX_TONE) && (parNr >= PAR_VFX_PAR1) && (parNr <= PAR_VFX_PAR6))
+	{
+		const uint8_t type = activeParameters[PAR_VFX_TYPE1 + (parNr - PAR_VFX_PAR1)];
+		if(type == VFX_COMPRESSOR)
+			return TEXT_VFX_TIME;
+		if(type == VFX_RING)
+			return TEXT_VFX_FREQ;
+	}
 	if((textId == TEXT_PWM) && (parNr >= PAR_PWM_1) && (parNr <= PAR_PWM_6))
 	{
 		static const uint8_t wavePar[6] = {

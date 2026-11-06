@@ -17,6 +17,7 @@
 #include "Soundengine/DSPAudio/Snare.h"
 #include "Soundengine/DSPAudio/CymbalVoice.h"
 #include "Soundengine/DSPAudio/HiHat.h"
+#include "Soundengine/DSPAudio/VoiceFx.h"
 #include <math.h>
 
 #define EXT(par)	((par) - PAR_BEGINNING_OF_KIT_EXT)
@@ -69,6 +70,12 @@ void voiceSettings_set(uint16_t paramNr, uint8_t value)
 		osc->scale = (value < NUM_SCALES) ? value : SCALE_12_TONES;
 		osc_recalcFreq(osc);
 	}
+	else if((paramNr >= PAR_VFX_TYPE1) && (paramNr <= PAR_VFX_TYPE6))
+		voiceFx_setType((uint8_t)(paramNr - PAR_VFX_TYPE1), value);
+	else if((paramNr >= PAR_VFX_AMT1) && (paramNr <= PAR_VFX_AMT6))
+		voiceFx_setAmount((uint8_t)(paramNr - PAR_VFX_AMT1), value);
+	else if((paramNr >= PAR_VFX_PAR1) && (paramNr <= PAR_VFX_PAR6))
+		voiceFx_setParam((uint8_t)(paramNr - PAR_VFX_PAR1), value);
 }
 
 //-----------------------------------------------------------------------

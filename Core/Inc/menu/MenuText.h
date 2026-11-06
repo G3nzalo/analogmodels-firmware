@@ -561,6 +561,7 @@ const char shortNames[][4]  =
 	{"shf"},
 	{"sat"},
 	{"scl"},
+	{"vfx"},
 
 };
 //-----------------------------------------------------------------
@@ -597,6 +598,7 @@ const char catNames[][16] =
 	{"MIDI"},
 	{"Clock"},
 	{"Fx"},
+	{"Voice FX"},
 };
 //-----------------------------------------------------------------
 // these must correspond to longNamesEnum

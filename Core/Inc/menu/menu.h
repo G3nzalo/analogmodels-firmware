@@ -275,6 +275,11 @@ enum NamesEnum
 	TEXT_PATTERN_MODE,
 	TEXT_MODEL_CHAR,			// the PWM knob while an 808/909 instrument runs (tube saturator)
 	TEXT_SCALE,					// scale of a voice: semitones, slendro or pelog
+	TEXT_VFX_TYPE,				// voice FX
+	TEXT_VFX_AMT,
+	TEXT_VFX_TONE,				// the third voice FX knob: tone of a distortion,
+	TEXT_VFX_TIME,				// time of the compressor,
+	TEXT_VFX_FREQ,				// frequency of the ring modulator
 
 
 	NUM_NAMES
@@ -386,7 +391,8 @@ enum shortNamesEnum
 	SHORT_FLAM,
 	SHORT_SHIFT,
 	SHORT_CHAR,
-	SHORT_SCALE
+	SHORT_SCALE,
+	SHORT_VFX
 
 	
 };
@@ -422,7 +428,8 @@ enum catNamesEnum
 	CAT_GENERATOR,
 	CAT_MIDI,
 	CAT_CLOCK,
-	CAT_FX
+	CAT_FX,
+	CAT_VFX
 };
 //-----------------------------------------------------------------
 // these must correspond with longNames in MenuText.h
