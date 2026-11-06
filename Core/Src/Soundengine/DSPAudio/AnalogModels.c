@@ -2,7 +2,8 @@
  * AnalogModels.c
  *
  * The instruments of the TR-808 and TR-909 for the LXR-02 voices, modelled
- * after their circuits (see AnalogModels.h for the list). Each instrument
+ * after their circuits, and acoustic instruments modelled after their modes
+ * of vibration (see AnalogModels.h for the list). Each instrument
  * renders its own pitch sweeps, clicks, noise and envelopes. The time scale of
  * the envelopes follows the voice's amp decay knob: the amp EG of the voice is
  * set up as a gate (see menu/modelPresets.c) and the instrument has faded to
@@ -741,6 +742,158 @@ static void model_rd9(ModelState* s, float* out, const uint8_t n, const ModelCtx
 }
 
 //-----------------------------------------------------------------------
+// The acoustic instruments are modal: each mode of the bar, kettle, skin or
+// wood is a sine at a ratio of the first mode's frequency with its own level
+// and decay, struck by a short burst of band passed noise (the mallet, stick
+// or hand). The upper modes are lower on soft hits.
+//-----------------------------------------------------------------------
+#define MAX_MODES	8
+
+typedef struct { float ratio, amp, tau; } Mode;	// tau relative to the main time constant
+
+typedef struct
+{
+	float	f;				// frequency of the first mode at the original tuning [Hz]
+	uint8_t	num;			// number of modes
+	Mode	m[MAX_MODES];
+	float	pairHz;			// > 0: two instruments that play together, this many Hz apart (num <= 4)
+	float	bend, bendVelo;	// the pitch starts higher by bend + bendVelo * velocity (skin tension)
+	float	bendTau;		// and settles with this time constant [s]
+	float	nzF, nzK;		// strike: band pass of the noise burst [Hz], 1/Q
+	float	nzTau, nzAmp;	// strike: time constant [s] and level
+	float	soft;			// a soft hit lowers the upper modes by up to this much
+} ModalDef;
+
+static void model_modal(ModelState* s, float* out, const uint8_t n, const ModelCtx* c, const ModalDef* d)
+{
+	const uint8_t num = d->num;
+	const uint8_t paired = d->pairHz > 0.f;
+	const float bend = d->bend + d->bendVelo * c->velo;
+	const float bright = 1.f - d->soft * (1.f - c->velo);
+	const float f = d->f * c->tf;
+	const float fA = paired ? f - 0.5f * d->pairHz : f;
+	const float fB = f + 0.5f * d->pairHz;
+	float incA[MAX_MODES], incB[MAX_MODES], r[MAX_MODES], amp[MAX_MODES];
+	for(uint8_t k = 0; k < num; k++)
+	{
+		incA[k] = d->m[k].ratio * fA * M_INV_FS;
+		incB[k] = d->m[k].ratio * fB * M_INV_FS;
+		r[k] = decayRate(d->m[k].tau * c->tau);
+		// muted where the start of the bend would alias
+		amp[k] = d->m[k].amp * (k ? bright : 1.f) * partialGain(incB[k] * (1.f + bend));
+	}
+	const float rB = decayRate(d->bendTau);
+	const float rN = decayRate(d->nzTau);
+	const SvfCoef bp = svf_coef(d->nzF * c->tf, d->nzK);
+	const float nzAmp = d->nzAmp * (0.4f + 0.6f * c->velo);
+	float b = s->env[8], e = s->env[9];
+	for(uint8_t i = 0; i < n; i++)
+	{
+		const float pm = 1.f + bend * b;
+		b *= rB;
+		float x = 0.f;
+		for(uint8_t k = 0; k < num; k++)
+		{
+			s->ph[k] = phaseAdd(s->ph[k], incA[k] * pm);
+			float y = sinCycle(s->ph[k]);
+			if(paired)
+			{
+				// the second one a little softer: the beats do not cancel completely
+				s->ph[k + 4] = phaseAdd(s->ph[k + 4], incB[k] * pm);
+				y += 0.8f * sinCycle(s->ph[k + 4]);
+			}
+			x += amp[k] * s->env[k] * y;
+			s->env[k] *= r[k];
+		}
+		out[i] = x + nzAmp * e * svf_band(&bp, &s->flt[0], rngFloat(s));
+		e *= rN;
+	}
+	s->env[8] = b; s->env[9] = e;
+}
+
+//-----------------------------------------------------------------------
+// Gamelan. SRN saron: a thick bronze bar on a box, struck with a hard mallet;
+// its modes after measured saron spectra (W. A. Sethares, "Tuning, Timbre,
+// Spectrum, Scale"). GND gender: thin keys over tube resonators, padded
+// mallets, played as the Balinese pair pengumbang and pengisep whose small
+// detuning beats (ombak). BNG bonang: a small bossed kettle gong, its
+// fundamental split into a slow beating doublet.
+//-----------------------------------------------------------------------
+static const ModalDef saron =
+{
+	523.25f, 5,
+	{ { 1.f, 1.f, 1.f }, { 2.39f, 0.10f, 0.30f }, { 2.76f, 0.42f, 0.42f }, { 4.75f, 0.22f, 0.20f }, { 5.96f, 0.10f, 0.12f } },
+	0.f, 0.f, 0.f, 0.01f,
+	3200.f, 0.9f, 0.0015f, 0.35f, 0.5f
+};
+
+static const ModalDef gender =
+{
+	261.63f, 3,
+	{ { 1.f, 1.f, 1.f }, { 2.756f, 0.08f, 0.30f }, { 5.404f, 0.025f, 0.15f } },
+	5.5f, 0.f, 0.f, 0.01f,
+	900.f, 1.2f, 0.003f, 0.08f, 0.6f
+};
+
+static const ModalDef bonang =
+{
+	523.25f, 6,
+	{ { 1.f, 1.f, 1.f }, { 1.0026f, 0.30f, 0.85f }, { 1.52f, 0.08f, 0.20f }, { 2.70f, 0.28f, 0.40f }, { 3.88f, 0.10f, 0.22f }, { 5.20f, 0.05f, 0.12f } },
+	0.f, 0.f, 0.f, 0.01f,
+	1600.f, 1.0f, 0.002f, 0.15f, 0.5f
+};
+
+//-----------------------------------------------------------------------
+// GNG: gong ageng, the large bossed gong. Its two strongest modes are nearly,
+// but not exactly, an octave apart. The gong's nonlinearity makes an octave of
+// the fundamental that beats with the second mode a few times per second
+// (B. J. Krueger, K. L. Gee, D. W. Grimshaw, JASA 128, EL8, 2010), and the
+// second mode builds up over the first half second. Asymmetric modes above
+// them, and a padded beater.
+//-----------------------------------------------------------------------
+static const Mode gongMode[6] =
+{
+	{ 1.f, 1.f, 1.f }, { 2.035f, 0.45f, 0.75f }, { 2.68f, 0.10f, 0.40f },
+	{ 3.06f, 0.09f, 0.35f }, { 3.77f, 0.06f, 0.25f }, { 4.43f, 0.04f, 0.18f }
+};
+
+static void model_gng(ModelState* s, float* out, const uint8_t n, const ModelCtx* c)
+{
+	const float f = 65.41f * c->tf;
+	float inc[6], r[6], amp[6];
+	for(uint8_t k = 0; k < 6; k++)
+	{
+		inc[k] = gongMode[k].ratio * f * M_INV_FS;
+		r[k] = decayRate(gongMode[k].tau * c->tau);
+		amp[k] = gongMode[k].amp * partialGain(inc[k]);
+	}
+	const float nl = (0.25f + 0.35f * c->velo) * partialGain(2.f * inc[0]);
+	const float rSwell = decayRate(0.25f);
+	const float rT = decayRate(0.03f);
+	const float lpT = onePole(250.f);
+	const float thump = 0.35f * (0.4f + 0.6f * c->velo);
+	float sw = s->env[8], th = s->env[9], lp = s->flt[0];
+	for(uint8_t i = 0; i < n; i++)
+	{
+		for(uint8_t k = 0; k < 6; k++)
+			s->ph[k] = phaseAdd(s->ph[k], inc[k]);
+		const float a0 = s->env[0];
+		const float q2 = 2.f * s->ph[0];
+		float x = amp[0] * a0 * sinCycle(s->ph[0]) + nl * a0 * a0 * sinCycle(q2 - (float)(int32_t)q2);
+		x += amp[1] * (1.f - sw) * s->env[1] * sinCycle(s->ph[1]);
+		for(uint8_t k = 2; k < 6; k++)
+			x += amp[k] * s->env[k] * sinCycle(s->ph[k]);
+		for(uint8_t k = 0; k < 6; k++)
+			s->env[k] *= r[k];
+		sw *= rSwell;
+		lp += lpT * (rngFloat(s) - lp);
+		out[i] = x + thump * th * lp;
+		th *= rT;
+	}
+	s->env[8] = sw; s->env[9] = th; s->flt[0] = lp;
+}
+
+//-----------------------------------------------------------------------
 // tube saturator on the PWM knob: an asymmetric triode style curve for even
 // harmonics, a low shelf in front of it for body, a DC blocker and a soft
 // high cut that closes a little as the drive goes up.
@@ -836,6 +989,7 @@ static const float modelLevel[NUM_ANALOG_MODELS] =
 	0.802f, 0.802f, 0.714f,	// RS8 RS9 CL8
 	1.393f, 1.132f, 0.430f, 0.774f,	// CP8 CP9 MA8 CB8
 	2.084f, 1.119f, 1.094f, 0.723f, 1.057f,	// HH8 HH9 CY8 CR9 RD9
+	0.586f, 0.440f, 0.476f, 0.499f,	// SRN GND BNG GNG
 };
 
 //-----------------------------------------------------------------------
@@ -887,6 +1041,10 @@ void model_calcBlock(OscInfo* osc, int16_t* buf, const uint8_t size, const float
 	case MODEL_CY8:	model_cy8(s, out, size, &c);	break;
 	case MODEL_CR9:	model_cr9(s, out, size, &c);	break;
 	case MODEL_RD9:	model_rd9(s, out, size, &c);	break;
+	case MODEL_SRN:	model_modal(s, out, size, &c, &saron);	break;
+	case MODEL_GND:	model_modal(s, out, size, &c, &gender);	break;
+	case MODEL_BNG:	model_modal(s, out, size, &c, &bonang);	break;
+	case MODEL_GNG:	model_gng(s, out, size, &c);	break;
 	default:
 		memset(buf, 0, size * sizeof(int16_t));
 		return;

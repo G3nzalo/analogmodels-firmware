@@ -302,7 +302,7 @@ const char syncRateNames[][4]  =
 //-----------------------------------------------------------------
 const char waveformNames[][4]  =
 {
-	{31},		//number of entries
+	{35},		//number of entries
 	{"Sin"}	,
 	{"Tri"}	,
 	{"Saw"}	,
@@ -335,6 +335,11 @@ const char waveformNames[][4]  =
 	{"CY8"}	,
 	{"CR9"}	,
 	{"RD9"}	,
+	//acoustic instruments (custom firmware)
+	{"SRN"}	,
+	{"GND"}	,
+	{"BNG"}	,
+	{"GNG"}	,
 };
 //-----------------------------------------------------------------
 const char fxWaveNames[][4]  =

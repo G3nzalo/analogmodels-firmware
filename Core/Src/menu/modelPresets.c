@@ -54,6 +54,10 @@ static const ModelPreset modelPresets[NUM_ANALOG_MODELS] =
 	{ 79,  0 },	// CY8 350 ms
 	{ 87,  0 },	// CR9 450 ms
 	{ 89,  0 },	// RD9 500 ms
+	{ 84,  0 },	// SRN 400 ms
+	{ 93,  0 },	// GND 570 ms
+	{ 74,  0 },	// BNG 290 ms
+	{120,  0 },	// GNG 1.45 s (10 s to -60 dB, the longest)
 };
 
 static const uint16_t parWave[6] = { PAR_OSC_WAVE_DRUM1, PAR_OSC_WAVE_DRUM2, PAR_OSC_WAVE_DRUM3, PAR_OSC_WAVE_SNARE, PAR_WAVE1_CYM, PAR_WAVE1_HH };

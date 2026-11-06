@@ -1,8 +1,9 @@
 /*
  * AnalogModels.h
  *
- * The instruments of the TR-808 and TR-909, modelled after their circuits.
- * They are selected like extra oscillator waveforms (after Sin, Tri, Saw, Rec,
+ * The instruments of the TR-808 and TR-909, modelled after their circuits,
+ * and acoustic instruments (gamelan, hand drums, taiko) modelled after their
+ * modes of vibration. They are selected like extra oscillator waveforms (after Sin, Tri, Saw, Rec,
  * Noi and PWM), so every voice keeps its tuning, filter, drive, LFO and FX.
  * Each instrument makes its own pitch sweeps, clicks, noise and envelopes;
  * the voice's amp decay knob sets how long it rings, and the PWM knob becomes
@@ -54,6 +55,10 @@ enum AnalogModelEnum
 	MODEL_CY8,		/* 808 cymbal */
 	MODEL_CR9,		/* 909 crash */
 	MODEL_RD9,		/* 909 ride */
+	MODEL_SRN,		/* gamelan saron */
+	MODEL_GND,		/* gamelan gender, a pair with ombak */
+	MODEL_BNG,		/* gamelan bonang */
+	MODEL_GNG,		/* gamelan gong ageng */
 	MODEL_END
 };
 
