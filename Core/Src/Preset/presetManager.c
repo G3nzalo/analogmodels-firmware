@@ -13,7 +13,9 @@
  *
  * Modified 2026 for a custom firmware (not an official Erica Synths release):
  * pattern files and tmp.pat carry the extra parameter locks of the pattern
- * (lock 3 and up of a step) behind the data of the original format.
+ * (lock 3 and up of a step) behind the data of the original format, and kit
+ * files and tmp.snd the kit extension (per-voice settings, see Parameters.h)
+ * behind the kit's parameters.
  * Also fixes from OpenElixir-02 by Moritz Waser (see the git history).
  */ 
 //#include "../config.h"
@@ -37,6 +39,7 @@
 #include "Soundengine/MIDI/MidiParser.h"
 #include "Soundengine/Sequencer/sequencer.h"
 #include "Soundengine/Soundengine.h"
+#include "Soundengine/DSPAudio/VoiceSettings.h"
 
 
 
@@ -260,6 +263,49 @@ void preset_touchTimer(PresetTimer type)
 };
 
 
+//----------------------------------------------------
+// The kit extension (custom firmware, see Parameters.h), behind the parameters
+// of a kit file or tmp.snd: a tag, the number of settings and the settings.
+// The original firmware stops reading before them, and a kit without them
+// gets the default settings.
+static const char preset_kitExtTag[4] = { 'X', 'K', 'T', '1' };
+
+static void preset_writeKitExt(const uint8_t* ext)
+{
+	unsigned int bytesWritten;
+	const uint8_t num = NUM_KIT_EXT;
+	preset_fwrite((FIL*)&SDFile, preset_kitExtTag, 4, &bytesWritten);
+	preset_fwrite((FIL*)&SDFile, &num, 1, &bytesWritten);
+	preset_fwrite((FIL*)&SDFile, ext, NUM_KIT_EXT, &bytesWritten);
+}
+
+static void preset_readKitExt(uint8_t* ext)
+{
+	char tag[4];
+	uint8_t num = 0;
+	uint8_t data[255];
+	unsigned int bytesRead = 0;
+
+	voiceSettings_defaults(ext);
+	if((f_read((FIL*)&SDFile, tag, 4, &bytesRead) != FR_OK) || (bytesRead != 4) || memcmp(tag, preset_kitExtTag, 4))
+		return;
+	if((f_read((FIL*)&SDFile, &num, 1, &bytesRead) != FR_OK) || (bytesRead != 1))
+		return;
+	// read into a buffer first: a damaged block leaves the defaults
+	if((f_read((FIL*)&SDFile, data, num, &bytesRead) != FR_OK) || (bytesRead != num))
+		return;
+	memcpy(ext, data, (num < NUM_KIT_EXT) ? num : NUM_KIT_EXT);
+	voiceSettings_validate(ext);
+}
+
+// sends the kit extension of the current kit to the sound engine
+static __attribute__((noinline)) void preset_sendKitExt()
+{
+	for(uint16_t p = PAR_BEGINNING_OF_KIT_EXT; p < NUM_PARAMS; p++)
+		voiceSettings_set(p, activeParameters[p]);
+}
+
+//----------------------------------------------------
 FRESULT preset_saveTmpKit()
 {
 #if USE_INTERRUPT_ONLY_DURING_SAVE_PROJ
@@ -296,6 +342,7 @@ FRESULT preset_saveTmpKit()
 	}
 	//write the preset data
 	preset_fwrite((FIL*)&SDFile,activeParameters,END_OF_SOUND_PARAMETERS,&bytesWritten);
+	preset_writeKitExt(&activeParameters[PAR_BEGINNING_OF_KIT_EXT]);
 
 	//close the file
 	res = preset_fcloseWrite();
@@ -354,6 +401,7 @@ FRESULT preset_LoadTmpKit()
 				if(para[PAR_TARGET_LFO1+i] >= nmt )
 					para[PAR_TARGET_LFO1+i] = 0;
 			}
+			preset_readKitExt(&activeParameters[PAR_BEGINNING_OF_KIT_EXT]);
 		}
 
 
@@ -825,8 +873,11 @@ void preset_init(uint8_t presetNr)
 			para[PAR_TARGET_LFO1+i] = 0;
 	}
 
+	voiceSettings_defaults(mainKitExt[presetNr]);
+
 	//copy parameters to edit buffer
 	memcpy(activeParameters, mainParameters[presetNr], sizeof(uint8_t) * END_OF_SOUND_PARAMETERS);
+	memcpy(&activeParameters[PAR_BEGINNING_OF_KIT_EXT], mainKitExt[presetNr], NUM_KIT_EXT);
 	preset_sendDrumsetParameters();
 	//frontPanel_sendData(PRESET,PRESET_LOAD,presetNr);
 
@@ -866,6 +917,8 @@ static void preset_writeDrumsetData(uint8_t presetNr, uint8_t isMorph)
 			preset_fwrite((FIL*)&SDFile,&mainParameters[presetNr][i],1,&bytesWritten);
 		}
 	}
+	// a morphed kit gets the settings of the current kit, they are not morphed
+	preset_writeKitExt(isMorph ? &activeParameters[PAR_BEGINNING_OF_KIT_EXT] : mainKitExt[presetNr]);
 }
 
 //----------------------------------------------------
@@ -880,6 +933,7 @@ void preset_loadDrumsetRam(uint8_t presetNr, uint8_t isMorph, uint8_t sendImmedi
 	{
 		//copy parameters to edit buffer
 		memcpy(activeParameters, mainParameters[presetNr], sizeof(uint8_t) * END_OF_SOUND_PARAMETERS);
+		memcpy(&activeParameters[PAR_BEGINNING_OF_KIT_EXT], mainKitExt[presetNr], NUM_KIT_EXT);
 		//if(activeParameters[PAR_PATTERN_MODE] = 1)
 		//load asociated morph kit as well
 
@@ -931,6 +985,8 @@ void preset_saveDrumsetRam(uint8_t presetNr, uint8_t isMorph)
 		//copy edit buffer to parameter array
 		memcpy(mainParameters[presetNr], activeParameters, sizeof(uint8_t) * END_OF_SOUND_PARAMETERS);
 	}
+	// the kit extension is not morphed: the settings of the current kit
+	memcpy(mainKitExt[presetNr], &activeParameters[PAR_BEGINNING_OF_KIT_EXT], NUM_KIT_EXT);
 }
 //----------------------------------------------------
 FRESULT preset_saveDrumsetSD(uint8_t presetNr, uint8_t isMorph)
@@ -970,7 +1026,7 @@ static void preset_writeGlobalData()
 {
 	unsigned int bytesWritten;
 	int i;
-	for(i=PAR_BEGINNING_OF_GLOBALS;(i<NUM_PARAMS);i++)
+	for(i=PAR_BEGINNING_OF_GLOBALS;(i<END_OF_GLOBAL_PARAMETERS);i++)
 	{
 		preset_fwrite((FIL*)&SDFile,&activeParameters[i],1,&bytesWritten);
 	}
@@ -1010,7 +1066,7 @@ static uint8_t preset_readGlobalData()
 	UINT bytesRead;
 #if 0
 	int i;
-	for(i=PAR_BEGINNING_OF_GLOBALS;(i<NUM_PARAMS) &&( bytesRead!=0);i++) {
+	for(i=PAR_BEGINNING_OF_GLOBALS;(i<END_OF_GLOBAL_PARAMETERS) &&( bytesRead!=0);i++) {
 		f_read((FIL*)&SDFile,&activeParameters[i],1,&bytesRead);
 		if(!bytesRead)
 			return 0;
@@ -1019,9 +1075,9 @@ static uint8_t preset_readGlobalData()
 		return 0;
 	return 1;
 #else
-	const uint8_t numGlobals = NUM_PARAMS - PAR_BEGINNING_OF_GLOBALS;
+	const uint8_t numGlobals = END_OF_GLOBAL_PARAMETERS - PAR_BEGINNING_OF_GLOBALS;
 	//read into a buffer first, so a damaged file doesn't leave half of the settings overwritten
-	uint8_t data[NUM_PARAMS - PAR_BEGINNING_OF_GLOBALS];
+	uint8_t data[END_OF_GLOBAL_PARAMETERS - PAR_BEGINNING_OF_GLOBALS];
 	if(f_read((FIL*)&SDFile,data,numGlobals,&bytesRead) != FR_OK || bytesRead != numGlobals) return 0;
 	memcpy(&activeParameters[PAR_BEGINNING_OF_GLOBALS],data,numGlobals);
 	return 1;
@@ -1209,6 +1265,9 @@ static FRESULT preset_readDrumsetData(uint8_t presetNr, uint8_t isMorph)
 			if(para[PAR_TARGET_LFO1+i] >= nmt )
 				para[PAR_TARGET_LFO1+i] = 0;
 		}
+		// the kit extension of a morph kit is not used
+		if(!isMorph)
+			preset_readKitExt(mainKitExt[presetNr]);
 	}
 
 	return res;
@@ -1344,6 +1403,8 @@ IN_ITCM_RAM void preset_sendDrumsetParametersImmediate()
 
 		//try to prevent click by sending BD params first
 
+		preset_sendKitExt();
+
 		//stuff from the morph function
 		for(uint32_t i=0;i<END_OF_SOUND_PARAMETERS; i++)
 		{
@@ -1417,6 +1478,8 @@ void preset_sendDrumsetParameters()
 		lower = value&0x7f;
 		frontPanel_sendData(CC_LFO_TARGET,upper,lower);
 	}
+
+	preset_sendKitExt();
 
 	// todo will this morph (and fuck up) our modulation targets?
 	// send parameters (possibly combined with morph parameters) to back
@@ -2492,7 +2555,7 @@ saveFailed:
 
 		// write some padding (we'll allocate 64 bytes for globals, right now we have +/- 18) so that
 		// we don't need to change the file format later
-		remain=	64- (NUM_PARAMS - PAR_BEGINNING_OF_GLOBALS);
+		remain=	64- (END_OF_GLOBAL_PARAMETERS - PAR_BEGINNING_OF_GLOBALS);
 
 	} else {
 		// write the bpm
@@ -2920,7 +2983,7 @@ FRESULT preset_loadProject(uint8_t presetNr, uint8_t clearTmp)
 		if(!preset_readGlobalData())
 			goto closeFile;
 		// size of padding after globals
-		remain=	64- (NUM_PARAMS - PAR_BEGINNING_OF_GLOBALS);
+		remain=	64- (END_OF_GLOBAL_PARAMETERS - PAR_BEGINNING_OF_GLOBALS);
 
 	} else {
 		// read bpm

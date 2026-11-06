@@ -1,2 +1,3 @@
 Src/Soundengine/DSPAudio/AnalogModels.c
 Src/menu/modelPresets.c
+Src/Soundengine/DSPAudio/VoiceSettings.c

@@ -28,6 +28,7 @@
 
 #include "Preset/PresetManager.h"
 #include "menu/menuPages.h"
+#include "Soundengine/DSPAudio/VoiceSettings.h"
 #include "menu/MenuText.h"
 //#include "../Hardware/timebase.h"
 //#include "../Hardware/SD/SPI_routines.h"
@@ -579,6 +580,14 @@ const enum Datatypes PROGMEM parameter_dtypes[NUM_PARAMS] = {
 	    /*PAR_MIDI_NOTE6*/		DTYPE_NOTE_NAME,
 	    /*PAR_MIDI_NOTE7*/		DTYPE_NOTE_NAME,
 		/*PAR_PATTERN_MODE*/ DTYPE_MENU | (MENU_PAT_MODE<<8),
+		// kit extension (custom firmware)
+		/*PAR_SCALE1..6*/		DTYPE_MENU | (MENU_SCALE<<8), DTYPE_MENU | (MENU_SCALE<<8), DTYPE_MENU | (MENU_SCALE<<8),
+								DTYPE_MENU | (MENU_SCALE<<8), DTYPE_MENU | (MENU_SCALE<<8), DTYPE_MENU | (MENU_SCALE<<8),
+		/*PAR_VFX_TYPE1..6*/	DTYPE_MENU | (MENU_VFX<<8), DTYPE_MENU | (MENU_VFX<<8), DTYPE_MENU | (MENU_VFX<<8),
+								DTYPE_MENU | (MENU_VFX<<8), DTYPE_MENU | (MENU_VFX<<8), DTYPE_MENU | (MENU_VFX<<8),
+		/*PAR_VFX_AMT1..6*/		DTYPE_0B127, DTYPE_0B127, DTYPE_0B127, DTYPE_0B127, DTYPE_0B127, DTYPE_0B127,
+		/*PAR_VFX_PAR1..6*/		DTYPE_0B127, DTYPE_0B127, DTYPE_0B127, DTYPE_0B127, DTYPE_0B127, DTYPE_0B127,
+		/*PAR_VFX_SEND1..6*/	DTYPE_0B127, DTYPE_0B127, DTYPE_0B127, DTYPE_0B127, DTYPE_0B127, DTYPE_0B127,
 };
 
 
@@ -706,6 +715,7 @@ static uint8_t lastEncoderButton = 0;		/**< stores the state of the encoder butt
 
 /** array holding all the available parameter values*/
 uint8_t mainParameters[NUM_KIT_SLOTS][END_OF_SOUND_PARAMETERS];
+uint8_t mainKitExt[NUM_KIT_SLOTS][NUM_KIT_EXT];	// the kit extension of each kit (custom firmware)
 //uint8_t abs_pot_Parameter_position[NUM_PARAMS];
 uint8_t activeParameters[NUM_PARAMS];
 //uint8_t morphParameters[END_OF_SOUND_PARAMETERS];/**< a second array for sound x-fade to another preset*/
@@ -766,6 +776,9 @@ void menu_init()
 	memset(saveScreenPots,0,4*sizeof(uint8_t));
 
 	memset(mainParameters, 0, sizeof(uint8_t) * END_OF_SOUND_PARAMETERS * NUM_KIT_SLOTS);
+	for(uint8_t k = 0; k < NUM_KIT_SLOTS; k++)
+		voiceSettings_defaults(mainKitExt[k]);
+	voiceSettings_defaults(&activeParameters[PAR_BEGINNING_OF_KIT_EXT]);
 
 
 	activeParameters[PAR_EUKLID_LENGTH] = 16;
@@ -2696,6 +2709,12 @@ static uint8_t getMaxEntriesForMenu(uint8_t menuId)
 	case MENU_FX_WAVEFORM:
 		return fxWaveNames[0][0];
 
+	case MENU_SCALE:
+		return scaleNames[0][0];
+
+	case MENU_VFX:
+		return vfxNames[0][0];
+
 	default:
 		return 0;
 	}
@@ -2808,6 +2827,14 @@ static void getMenuItemNameForValue(const uint8_t menuId, const uint8_t curParmV
 
 	case MENU_FX_WAVEFORM:
 		p=fxWaveNames[(curParmVal < fxWaveNames[0][0] ? curParmVal : 0) + 1];
+		break;
+
+	case MENU_SCALE:
+		p = MENU_ITEM(scaleNames);
+		break;
+
+	case MENU_VFX:
+		p = MENU_ITEM(vfxNames);
 		break;
 
 
@@ -3517,7 +3544,7 @@ void menu_switchPage(uint8_t pageNr)
 void menu_sendAllGlobals()
 {
 	uint16_t i;
-	for(i=PAR_BEGINNING_OF_GLOBALS;(i<NUM_PARAMS);i++)
+	for(i=PAR_BEGINNING_OF_GLOBALS;(i<END_OF_GLOBAL_PARAMETERS);i++)
 	{
 		menu_parseGlobalParam(i,activeParameters[i]);
 	}
@@ -3797,6 +3824,11 @@ void menu_parseGlobalParam(uint16_t paramNr, uint8_t value)
 		frontPanel_sendData(SEQ_CC, SEQ_BAR_RESET_MODE, value);
 		break;
 
+	default:
+		// the kit extension goes straight to the sound engine
+		if((paramNr >= PAR_BEGINNING_OF_KIT_EXT) && (paramNr < NUM_PARAMS))
+			voiceSettings_set(paramNr, value);
+		break;
 	}
 }
 //-----------------------------------------------------------------

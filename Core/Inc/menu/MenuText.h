@@ -12,8 +12,9 @@
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
  *
  * Modified 2026 for a custom firmware (not an official Erica Synths release):
- * the waveform list names the 808/909 instruments, and the PWM knob is
- * labelled "sat" (tube saturator) while one runs.
+ * the waveform list names the 808/909 and acoustic instruments, the PWM knob
+ * is labelled "sat" (tube saturator) while one runs, and the lists of the
+ * scales and voice FX.
  */ 
 
 
@@ -48,6 +49,8 @@
 #define MENU_STEP_SHIFT	 	25
 #define MENU_AUDIO_OUT_FX	26
 #define MENU_FX_WAVEFORM	27	// the ring mod FX only has the six original waveforms
+#define MENU_SCALE			28	// scale of a voice (custom firmware)
+#define MENU_VFX			29	// voice FX type (custom firmware)
 
 //-----------------------------------------------------------------
 // Shared texts. Reduce mem usage by pooling common text
@@ -140,6 +143,27 @@ const char fxNames[][4] =
 	{"cmp"},
 	{"del"},
 	//{"rev"}
+};
+//-----------------------------------------------------------------
+// the scales of a voice, see VoiceSettings.h (custom firmware)
+const char scaleNames[][4] =
+{
+	{3},		//number of entries
+	{"12"},
+	{"sln"},
+	{"plg"}
+};
+//-----------------------------------------------------------------
+// the voice FX, see VoiceSettings.h (custom firmware)
+const char vfxNames[][4] =
+{
+	{6},		//number of entries
+	{"off"},
+	{"cmp"},
+	{"tub"},
+	{"fld"},
+	{"clp"},
+	{"rng"}
 };
 //-----------------------------------------------------------------
 const char distNames[][4] =

@@ -20,7 +20,7 @@ played the way the sequencer plays a step with locks; `kits.py` grooves use the 
 `gen_project.py` writes them into the pattern files (lock 1 and 2 in the step, the others in the
 pattern's lock list behind the original data). `stub/` replaces the
 STM32 HAL with just enough for the DSP code to compile on a PC; the PC runs with flush-to-zero
-like the STM32. `src/param_names.h` is generated from `Core/Inc/Parameters.h`.
+like the STM32. `src/param_names.h` is generated from `Core/Inc/Parameters.h` by `gen_param_names.py`.
 
 `test/` has two tests. `plock_test` checks the step parameter locks (hold a step, turn knobs,
 release, play; up to eight locks per step, a full lock pool, recording while playing) and choosing

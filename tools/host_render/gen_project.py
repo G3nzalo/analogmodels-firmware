@@ -137,7 +137,8 @@ def main():
             if not os.path.exists(path):
                 sys.exit(f"{path} is missing: render all kit scripts made by kits.py first")
             data = open(path, "rb").read()
-            assert len(data) == 8 + END_OF_SOUND_PARAMETERS, (k["name"], len(data))
+            # name, parameters and the kit extension (XKT1 block) of the custom firmware
+            assert len(data) >= 8 + END_OF_SOUND_PARAMETERS, (k["name"], len(data))
             name = k["name"]
         else:
             name = "Init"

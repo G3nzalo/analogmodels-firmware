@@ -5,8 +5,10 @@
  *
  * Script commands (one per line, '#' starts a comment):
  *   kit init                 load the firmware's built-in init kit
- *   kitfile <path>           load a kit file (8 byte name + 247 parameter bytes)
- *   savekit <path> <name>    write the current parameters as a kit file
+ *   kitfile <path>           load a kit file (8 byte name + 247 parameter bytes,
+ *                            then the kit extension if there is one)
+ *   savekit <path> <name>    write the current parameters as a kit file, with
+ *                            the kit extension like the firmware
  *   set <param> <value>      set a sound parameter (name like PAR_COARSE1 or index)
  *   preset <voice> <wave>    choose waveform <wave> (number) for voice 0..5 like the
  *                            menu does: an 808/909 instrument also gets its voice settings
@@ -44,6 +46,7 @@
 #include "Soundengine/MIDI/MidiMessages.h"
 #include "Soundengine/DSPAudio/automationNode.h"
 #include "menu/modelPresets.h"
+#include "Soundengine/DSPAudio/VoiceSettings.h"
 #include "param_names.h"
 
 #ifndef CC_2
@@ -78,6 +81,10 @@ static void setParam(int i, uint8_t val)
 {
 	MidiMsg msg = {0};
 	activeParameters[i] = val;
+	if (i >= PAR_BEGINNING_OF_KIT_EXT) {	/* menu_parseGlobalParam() */
+		voiceSettings_set((uint16_t)i, val);
+		return;
+	}
 	if (i < 128) {
 		msg.status = MIDI_CC;
 		msg.data1 = (uint8_t)((i + 1) & 0x7f);
@@ -99,6 +106,20 @@ static void applyKit(const uint8_t *params, int n)
 {
 	for (int i = 0; i < END_OF_SOUND_PARAMETERS; i++)
 		setParam(i, i < n ? params[i] : 0);
+}
+
+/* the kit extension behind the parameters of a kit file (presetManager.c):
+ * "XKT1", the number of settings, the settings; defaults without it */
+static void applyKitExt(const uint8_t *data, int n)
+{
+	uint8_t ext[NUM_KIT_EXT];
+	voiceSettings_defaults(ext);
+	if (n >= 5 && !memcmp(data, "XKT1", 4) && n >= 5 + data[4]) {
+		memcpy(ext, data + 5, data[4] < NUM_KIT_EXT ? data[4] : NUM_KIT_EXT);
+		voiceSettings_validate(ext);
+	}
+	for (int i = 0; i < NUM_KIT_EXT; i++)
+		setParam(PAR_BEGINNING_OF_KIT_EXT + i, ext[i]);
 }
 
 static void engineInit(void)
@@ -238,23 +259,32 @@ int main(int argc, char **argv)
 	if (!f) { perror(argv[1]); return 1; }
 	engineInit();
 	applyKit(&initKit[8], INIT_KIT_SIZE - 8);
+	applyKitExt(NULL, 0);
 	char line[512];
 	while (fgets(line, sizeof line, f)) {
 		char *c = strchr(line, '#'); if (c) *c = 0;
 		char cmd[64] = "", a[256] = "", b[256] = "", cc[64] = "", d[64] = "";
 		int n = sscanf(line, "%63s %255s %255s %63s %63s", cmd, a, b, cc, d);
 		if (n <= 0) continue;
-		if (!strcmp(cmd, "kit") && !strcmp(a, "init")) applyKit(&initKit[8], INIT_KIT_SIZE - 8);
+		if (!strcmp(cmd, "kit") && !strcmp(a, "init")) {
+			applyKit(&initKit[8], INIT_KIT_SIZE - 8);
+			applyKitExt(NULL, 0);
+		}
 		else if (!strcmp(cmd, "kitfile")) {
-			FILE *k = fopen(a, "rb"); uint8_t kb[8 + END_OF_SOUND_PARAMETERS] = {0};
+			FILE *k = fopen(a, "rb"); uint8_t kb[8 + END_OF_SOUND_PARAMETERS + 5 + 255] = {0};
 			if (!k) { perror(a); return 1; }
 			size_t got = fread(kb, 1, sizeof kb, k); fclose(k);
 			applyKit(kb + 8, (int)got - 8);
+			const int rest = (int)got - 8 - END_OF_SOUND_PARAMETERS;
+			applyKitExt(kb + 8 + END_OF_SOUND_PARAMETERS, rest > 0 ? rest : 0);
 		}
 		else if (!strcmp(cmd, "savekit")) {
 			FILE *k = fopen(a, "wb"); char name[8] = {0};
+			const uint8_t num = NUM_KIT_EXT;
 			strncpy(name, b, 8); fwrite(name, 1, 8, k);
-			fwrite(activeParameters, 1, END_OF_SOUND_PARAMETERS, k); fclose(k);
+			fwrite(activeParameters, 1, END_OF_SOUND_PARAMETERS, k);
+			fwrite("XKT1", 1, 4, k); fwrite(&num, 1, 1, k);
+			fwrite(&activeParameters[PAR_BEGINNING_OF_KIT_EXT], 1, NUM_KIT_EXT, k); fclose(k);
 		}
 		else if (!strcmp(cmd, "set")) setParam(paramIndex(a), (uint8_t)atoi(b));
 		else if (!strcmp(cmd, "preset")) {

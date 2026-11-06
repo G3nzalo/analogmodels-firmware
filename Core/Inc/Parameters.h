@@ -10,6 +10,9 @@
  * This file is part of the LXR firmware. It is licensed under the GNU General
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
+ *
+ * Modified 2026 for a custom firmware (not an official Erica Synths release):
+ * the kit extension, per-voice settings behind the kit's parameters.
  */ 
 
 
@@ -426,8 +429,52 @@ enum ParamEnums
 
 		PAR_PATTERN_MODE,
 
+	END_OF_GLOBAL_PARAMETERS,	// glo.cfg holds the globals from PAR_BEGINNING_OF_GLOBALS up to here
+
+	//#########################################
+	//######## Kit extension ##################
+	//#########################################
+	// AnalogModels (custom firmware): settings of each voice that belong to the
+	// kit but are not among the END_OF_SOUND_PARAMETERS parameters of the kit
+	// files. The preset manager saves them behind those, where the official
+	// firmware does not read. They are not morphed, cannot be locked on a step
+	// and have no MIDI CC. See Soundengine/DSPAudio/VoiceSettings.h.
+	PAR_BEGINNING_OF_KIT_EXT = END_OF_GLOBAL_PARAMETERS,
+	PAR_SCALE1 = PAR_BEGINNING_OF_KIT_EXT,	// scale of the voice's oscillator
+	PAR_SCALE2,
+	PAR_SCALE3,
+	PAR_SCALE4,
+	PAR_SCALE5,
+	PAR_SCALE6,
+	PAR_VFX_TYPE1,							// voice FX: type
+	PAR_VFX_TYPE2,
+	PAR_VFX_TYPE3,
+	PAR_VFX_TYPE4,
+	PAR_VFX_TYPE5,
+	PAR_VFX_TYPE6,
+	PAR_VFX_AMT1,							// voice FX: amount
+	PAR_VFX_AMT2,
+	PAR_VFX_AMT3,
+	PAR_VFX_AMT4,
+	PAR_VFX_AMT5,
+	PAR_VFX_AMT6,
+	PAR_VFX_PAR1,							// voice FX: time, tone or frequency by type
+	PAR_VFX_PAR2,
+	PAR_VFX_PAR3,
+	PAR_VFX_PAR4,
+	PAR_VFX_PAR5,
+	PAR_VFX_PAR6,
+	PAR_VFX_SEND1,							// send to the FX bus
+	PAR_VFX_SEND2,
+	PAR_VFX_SEND3,
+	PAR_VFX_SEND4,
+	PAR_VFX_SEND5,
+	PAR_VFX_SEND6,
+
 	NUM_PARAMS	
 };
+
+#define NUM_KIT_EXT (NUM_PARAMS - PAR_BEGINNING_OF_KIT_EXT)
 
 extern uint8_t parameterOrder[END_OF_SOUND_PARAMETERS];
 
