@@ -11,7 +11,8 @@
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
  *
  * Modified 2026 for a custom firmware (not an official Erica Synths release):
- * OscInfo carries the state of the 808/909 instruments (AnalogModels.h).
+ * OscInfo carries the state of the instruments (AnalogModels.h) and the
+ * scale of the voice (VoiceSettings.h).
  */
 
 
@@ -62,6 +63,7 @@ typedef struct OscStruct
 	//for midi
 	uint16_t	midiFreq;  //upper 8 bit coarse, lower 8 bit fine -> the sound edit freq offset
 	uint8_t baseNote;		// the last played midi note
+	uint8_t scale;			// slendro or pelog instead of semitones (VoiceSettings.h, custom firmware)
 	uint32_t startPhase;		// the OSC is reset to this phase on retrigger
 
 	//808/909 instrument models (waveforms after PWM, see AnalogModels.h)

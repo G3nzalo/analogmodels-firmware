@@ -42,6 +42,11 @@ enum VoiceFxTypes
 	NUM_VFX
 };
 
+/** the frequency ratio of step n of a scale from its first note (coarse 0
+ * on the display): n counts the semitones of the official firmware, which
+ * step through the five tones of slendro or the seven of pelog instead */
+float voiceSettings_scaleRatio(uint8_t scale, int16_t n);
+
 /** applies one setting (PAR_BEGINNING_OF_KIT_EXT <= paramNr < NUM_PARAMS) to the sound engine */
 void voiceSettings_set(uint16_t paramNr, uint8_t value);
 

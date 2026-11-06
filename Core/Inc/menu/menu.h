@@ -274,6 +274,7 @@ enum NamesEnum
 	TEXT_FX_P4,
 	TEXT_PATTERN_MODE,
 	TEXT_MODEL_CHAR,			// the PWM knob while an 808/909 instrument runs (tube saturator)
+	TEXT_SCALE,					// scale of a voice: semitones, slendro or pelog
 
 
 	NUM_NAMES
@@ -384,7 +385,8 @@ enum shortNamesEnum
 	SHORT_KCM,
 	SHORT_FLAM,
 	SHORT_SHIFT,
-	SHORT_CHAR
+	SHORT_CHAR,
+	SHORT_SCALE
 
 	
 };
@@ -514,7 +516,8 @@ enum longNamesEnum
 	LONG_PATTERN_MODE,
 	LONG_FLAM,
 	LONG_SHIFT,
-	LONG_CHAR
+	LONG_CHAR,
+	LONG_SCALE
 	
 };
 

@@ -11,12 +11,14 @@
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
  *
  * Modified 2026 for a custom firmware (not an official Erica Synths release):
- * waveforms after PWM run the 808/909 instruments (AnalogModels.c).
+ * waveforms after PWM run the instruments (AnalogModels.c), and a voice's
+ * notes can step through slendro or pelog (VoiceSettings.c).
  */
 
 
 #include "Soundengine/DSPAudio/Oscillator.h"
 #include "Soundengine/DSPAudio/AnalogModels.h"
+#include "Soundengine/DSPAudio/VoiceSettings.h"
 #include "Soundengine/DSPAudio/random.h"
 #include "Soundengine/DSPAudio/Samples.h"
 #include "Soundengine/MIDI/MidiParser.h"
@@ -804,7 +806,11 @@ void osc_calcUserSampleFreq(OscInfo* osc)
 	 if(note>127)note=127;
 	 if(note<0)note=0;
 
-	 osc->freq = MidiNoteFrequencies[note]*cent;
+	 // slendro or pelog: the notes step through the scale from coarse 0
+	 if(osc->scale)
+		 osc->freq = MidiNoteFrequencies[SEQ_DEFAULT_NOTE]*voiceSettings_scaleRatio(osc->scale, note-SEQ_DEFAULT_NOTE)*cent;
+	 else
+		 osc->freq = MidiNoteFrequencies[note]*cent;
 	 osc->baseNote = baseNote;
  };
 
@@ -819,6 +825,10 @@ void osc_calcUserSampleFreq(OscInfo* osc)
 	 if(note>127)note=127;
  	 if(note<0)note=0;
 
-	 osc->freq = MidiNoteFrequencies[note]*cent;
+	 // slendro or pelog: the notes step through the scale from coarse 0
+	 if(osc->scale)
+		 osc->freq = MidiNoteFrequencies[SEQ_DEFAULT_NOTE]*voiceSettings_scaleRatio(osc->scale, note-SEQ_DEFAULT_NOTE)*cent;
+	 else
+		 osc->freq = MidiNoteFrequencies[note]*cent;
  }
  //-----------------------------------------------------------

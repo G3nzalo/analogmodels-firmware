@@ -560,6 +560,7 @@ const char shortNames[][4]  =
 	{"flm"},
 	{"shf"},
 	{"sat"},
+	{"scl"},
 
 };
 //-----------------------------------------------------------------
@@ -691,6 +692,7 @@ const char longNames[][16] =
 	{"Flam"},
 	{"Shift"},
 	{"TubeSat"},
+	{"Scale"},
 };
 
 

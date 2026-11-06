@@ -13,6 +13,8 @@
  * NUM_STEP_LOCKS parameters (buttonHandler_prepareStepLock), an already locked
  * parameter keeps its lock, a knob without a parameter does nothing, and
  * clicking the encoder while a step is held clears that step's locks.
+ * The kit extension (per-voice settings, see Parameters.h) goes straight to
+ * the sound engine.
  * Also fixes from OpenElixir-02 by Moritz Waser (see the git history).
  */
 
@@ -264,6 +266,7 @@ const Name valueNames[NUM_NAMES] =
 		{SHORT_P4, CAT_FX, LONG_P4},/*TEXT_FX_P4*/
 		{SHORT_KCM, CAT_GLOBAL, LONG_PATTERN_MODE},/*TEXT_AUTO_SWITCH_KIT*/
 		{SHORT_CHAR, CAT_OSC, LONG_CHAR},/*TEXT_MODEL_CHAR*/
+		{SHORT_SCALE, CAT_OSC, LONG_SCALE},/*TEXT_SCALE*/
 
 
 };
