@@ -3,8 +3,11 @@
  *
  * The voice FX, see VoiceFx.h. Amount and the third knob by type:
  * - cmp compressor: amount lowers the threshold (0 to -40 dB) and raises the
- *   ratio (1:1 to 10:1), with make-up gain and a soft limit; time sets attack
- *   and release together (0.1 ms / 30 ms to 5 ms / 600 ms).
+ *   ratio (1:1 to 10:1). The make-up gain gives back all the gain a full-scale
+ *   hit loses, so the voice keeps its peak level and gets denser and louder as
+ *   the amount goes up; a soft limit catches the transients that pass the
+ *   attack. Time sets attack and release together (0.1 ms / 30 ms to 5 ms /
+ *   600 ms).
  * - tub tube: an asymmetric soft saturation, even harmonics.
  * - fld wavefolder: folds the wave back beyond full scale.
  * - clp clipper: hard clipping.
@@ -171,7 +174,7 @@ static void voiceFx_compressor(VoiceFxState* s, int16_t* buf, const uint8_t size
 {
 	const float thr = -40.f * s->amt * (1.f / 6.0206f);	// threshold in log2 units (6.02 dB each)
 	const float slope = 1.f - 1.f / (1.f + 9.f * s->amt);	// 1 - 1/ratio
-	const float makeup = -0.75f * thr * slope;			// most of the gain lost at full scale
+	const float makeup = -thr * slope;					// all the gain lost at full scale
 	const float atk = 1.f - expf(-FX_INV_FS / (0.0001f * powf(50.f, s->par)));
 	const float rel = 1.f - expf(-FX_INV_FS / (0.03f * powf(20.f, s->par)));
 	const float pre = 1.f / vol;

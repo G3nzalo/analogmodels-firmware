@@ -121,7 +121,7 @@ the ring modulator with different settings, say.
 
 | `vfx` | Amount (`amt`) | Third knob |
 |---|---|---|
-| `cmp` compressor | threshold 0 to -40 dB and ratio 1:1 to 10:1, with make-up gain and a soft limit | `tim`: attack and release, 0.1 ms / 30 ms to 5 ms / 600 ms |
+| `cmp` compressor | threshold 0 to -40 dB and ratio 1:1 to 10:1; the make-up gain gives back all the gain a full-scale hit loses, so the voice keeps its peak level and gets denser and louder as the amount goes up; a soft limit catches the transients | `tim`: attack and release, 0.1 ms / 30 ms to 5 ms / 600 ms |
 | `tub` tube, `fld` wavefolder, `clp` clipper | drive, up to +24 dB | `ton`: a low pass after it, 1 kHz to open |
 | `rng` ring modulator | how much of it | `frq`: the carrier, 30 Hz to 6 kHz |
 
