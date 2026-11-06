@@ -98,7 +98,8 @@ the most expensive, 31k).
 
 ### Slendro and pelog (version 0.5)
 
-The oscillator page of every voice has a new setting, **`scl`**: `12` (semitones, as before), `sln`
+The oscillator page of every voice has a new setting, **`scl`**, on its second screen (press the
+page button again; knob 1, on the snare voice knob 3): `12` (semitones, as before), `sln`
 (slendro) or `plg` (pelog). With a gamelan scale the notes of the steps, of MIDI and of the coarse
 knob walk through the five tones of slendro or the seven of pelog instead of the twelve semitones:
 from coarse 0 one step up is the next tone of the scale, five (or seven) steps up the next octave.
@@ -113,8 +114,10 @@ gamelans:
 
 ### Voice FX (version 0.5)
 
-The filter page of every voice has four more knobs (5 to 8) for an effect on that voice only, at its
-end (after filter, drive and sample rate reduction), besides the one FX all voices share:
+The filter page of every voice has a second screen (press the filter page button again) whose four
+knobs set an effect for that voice only, at its end (after filter, drive and sample rate
+reduction), besides the one FX all voices share. Every voice has its own: two voices can both use
+the ring modulator with different settings, say.
 
 | `vfx` | Amount (`amt`) | Third knob |
 |---|---|---|
