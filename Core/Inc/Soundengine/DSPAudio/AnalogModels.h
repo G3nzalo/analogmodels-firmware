@@ -64,6 +64,10 @@ enum AnalogModelEnum
 	MODEL_DJS,		/* djembe slap */
 	MODEL_CGO,		/* conga open tone */
 	MODEL_CGS,		/* conga slap */
+	MODEL_ODK,		/* taiko: odaiko */
+	MODEL_NGD,		/* taiko: nagado-daiko */
+	MODEL_SHM,		/* taiko: shime-daiko */
+	MODEL_TKR,		/* taiko: the bachi on the rim */
 	MODEL_END
 };
 

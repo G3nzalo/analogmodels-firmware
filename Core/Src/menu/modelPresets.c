@@ -63,6 +63,10 @@ static const ModelPreset modelPresets[NUM_ANALOG_MODELS] =
 	{ 25,  0 },	// DJS  52 ms
 	{ 49,  0 },	// CGO 130 ms
 	{ 22,  0 },	// CGS  44 ms
+	{ 80,  0 },	// ODK 360 ms
+	{ 58,  0 },	// NGD 180 ms
+	{ 25,  0 },	// SHM  52 ms
+	{ 10,  0 },	// TKR  18 ms
 };
 
 static const uint16_t parWave[6] = { PAR_OSC_WAVE_DRUM1, PAR_OSC_WAVE_DRUM2, PAR_OSC_WAVE_DRUM3, PAR_OSC_WAVE_SNARE, PAR_WAVE1_CYM, PAR_WAVE1_HH };

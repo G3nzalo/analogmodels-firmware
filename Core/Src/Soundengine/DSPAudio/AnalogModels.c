@@ -898,6 +898,49 @@ static const ModalDef congaSlap =
 };
 
 //-----------------------------------------------------------------------
+// Taiko, struck with the bachi. Two thick cowhide heads coupled by the air in
+// the body; the pitch starts higher and settles as the hit fades (the
+// tension of the skin rises with its swing), more on hard hits. ODK odaiko,
+// the big drum (49 Hz); NGD nagado-daiko (98 Hz); SHM shime-daiko, small and
+// laced very tight (420 Hz); TKR the bachi on the wooden rim ("ka"): a few
+// short resonances of the wood.
+//-----------------------------------------------------------------------
+static const ModalDef odaiko =
+{
+	49.f, 8,
+	{ { 1.f, 1.f, 1.f }, { 1.38f, 0.40f, 0.55f }, { 1.66f, 0.35f, 0.60f }, { 2.17f, 0.22f, 0.40f },
+	  { 2.68f, 0.14f, 0.30f }, { 3.20f, 0.09f, 0.22f }, { 4.10f, 0.06f, 0.15f }, { 5.30f, 0.04f, 0.10f } },
+	0.f, 0.06f, 0.08f, 0.07f,
+	1100.f, 1.2f, 0.006f, 0.30f, 0.5f
+};
+
+static const ModalDef nagado =
+{
+	98.f, 8,
+	{ { 1.f, 1.f, 1.f }, { 1.38f, 0.40f, 0.55f }, { 1.66f, 0.35f, 0.60f }, { 2.17f, 0.22f, 0.40f },
+	  { 2.68f, 0.14f, 0.30f }, { 3.20f, 0.09f, 0.22f }, { 4.10f, 0.06f, 0.15f }, { 5.30f, 0.04f, 0.10f } },
+	0.f, 0.05f, 0.06f, 0.05f,
+	1400.f, 1.1f, 0.005f, 0.32f, 0.5f
+};
+
+static const ModalDef shime =
+{
+	420.f, 6,
+	{ { 1.f, 1.f, 1.f }, { 1.594f, 0.45f, 0.60f }, { 2.136f, 0.32f, 0.50f }, { 2.296f, 0.12f, 0.40f },
+	  { 2.653f, 0.20f, 0.35f }, { 2.918f, 0.10f, 0.30f } },
+	0.f, 0.02f, 0.02f, 0.01f,
+	3500.f, 0.9f, 0.002f, 0.40f, 0.5f
+};
+
+static const ModalDef taikoRim =
+{
+	1150.f, 5,
+	{ { 1.f, 1.f, 1.f }, { 1.626f, 0.60f, 0.70f }, { 2.304f, 0.45f, 0.50f }, { 3.391f, 0.25f, 0.35f }, { 0.365f, 0.35f, 0.80f } },
+	0.f, 0.f, 0.f, 0.01f,
+	4500.f, 0.8f, 0.0012f, 0.60f, 0.4f
+};
+
+//-----------------------------------------------------------------------
 // GNG: gong ageng, the large bossed gong. Its two strongest modes are nearly,
 // but not exactly, an octave apart. The gong's nonlinearity makes an octave of
 // the fundamental that beats with the second mode a few times per second
@@ -1045,6 +1088,7 @@ static const float modelLevel[NUM_ANALOG_MODELS] =
 	2.084f, 1.119f, 1.094f, 0.723f, 1.057f,	// HH8 HH9 CY8 CR9 RD9
 	0.586f, 0.440f, 0.476f, 0.499f,	// SRN GND BNG GNG
 	0.918f, 0.365f, 0.256f, 0.493f, 0.297f,	// DJB DJT DJS CGO CGS
+	0.466f, 0.455f, 0.455f, 0.415f,	// ODK NGD SHM TKR
 };
 
 //-----------------------------------------------------------------------
@@ -1105,6 +1149,10 @@ void model_calcBlock(OscInfo* osc, int16_t* buf, const uint8_t size, const float
 	case MODEL_DJS:	model_modal(s, out, size, &c, &djembeSlap);	break;
 	case MODEL_CGO:	model_modal(s, out, size, &c, &congaOpen);	break;
 	case MODEL_CGS:	model_modal(s, out, size, &c, &congaSlap);	break;
+	case MODEL_ODK:	model_modal(s, out, size, &c, &odaiko);	break;
+	case MODEL_NGD:	model_modal(s, out, size, &c, &nagado);	break;
+	case MODEL_SHM:	model_modal(s, out, size, &c, &shime);	break;
+	case MODEL_TKR:	model_modal(s, out, size, &c, &taikoRim);	break;
 	default:
 		memset(buf, 0, size * sizeof(int16_t));
 		return;
