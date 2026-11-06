@@ -1,7 +1,7 @@
 /*
  * AnalogModelState.h
  *
- * Per-oscillator state of the 808/909 instrument models (see AnalogModels.h).
+ * Per-oscillator state of the instrument models (see AnalogModels.h).
  * Kept in its own header so Oscillator.h can embed it in OscInfo without
  * a circular include.
  *
@@ -22,8 +22,8 @@
 typedef struct ModelStateStruct
 {
 	float		flt[10];	// filter states
-	float		env[4];		// envelopes of the parts of the instrument
-	float		ph[4];		// phases [0:1) of the sine and triangle oscillators
+	float		env[10];	// envelopes of the parts or modes of the instrument
+	float		ph[8];		// phases [0:1) of the sine oscillators and modes
 	float		click;		// trigger pulse low pass
 	float		velo;		// velocity of the last hit [0:1]
 	float		drift;		// small random pitch offset of the last hit

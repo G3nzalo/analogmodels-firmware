@@ -797,11 +797,10 @@ void model_trigger(OscInfo* osc, const uint8_t vel)
 	s->burst = 0;
 	s->nextBurst = 0;
 	s->click = 0.f;
-	for(uint8_t k = 0; k < 4; k++)
-	{
+	for(uint8_t k = 0; k < 8; k++)
 		s->ph[k] = 0.f;
+	for(uint8_t k = 0; k < 10; k++)
 		s->env[k] = 1.f;
-	}
 	// filter states restart from zero, the 808 metal keeps running like the
 	// free running analog oscillators
 	for(uint8_t k = 0; k < 10; k++)
