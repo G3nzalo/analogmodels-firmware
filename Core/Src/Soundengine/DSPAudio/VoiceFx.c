@@ -13,6 +13,9 @@
  *   to open).
  * - rng ring modulator: amount mixes the ring modulated signal in, frequency
  *   is the carrier (30 Hz to 6 kHz).
+ * The voice's volume (its MIX page volume and its fader) comes at the end of
+ * the voice, so the FX take it back out first: their threshold and drive stay
+ * the same at any volume, and the volume still sets the level.
  * The send to the FX bus follows the FX, with a squared taper (64 is -12 dB).
  * Nothing here runs from ITCM.
  *
@@ -28,6 +31,10 @@
 #include "Soundengine/DSPAudio/VoiceFx.h"
 #include "Soundengine/DSPAudio/VoiceSettings.h"
 #include "Soundengine/DSPAudio/mixer.h"
+#include "Soundengine/DSPAudio/DrumVoice.h"
+#include "Soundengine/DSPAudio/Snare.h"
+#include "Soundengine/DSPAudio/CymbalVoice.h"
+#include "Soundengine/DSPAudio/HiHat.h"
 #include "Soundengine/config.h"
 #include <math.h>
 
@@ -144,33 +151,51 @@ static inline int16_t toInt16(const float x)
 }
 
 //-----------------------------------------------------------------------
-static void voiceFx_compressor(VoiceFxState* s, int16_t* buf, const uint8_t size)
+/** the volume a voice applies at its end: the volume knob and the fader */
+static float voiceFx_channelVolume(const uint8_t voice)
+{
+	switch(voice)
+	{
+	case 0:
+	case 1:
+	case 2:		return voiceArray[voice].vol * (float)voiceArray[voice].FaderVolumeFilter.b;
+	case 3:		return snareVoice.vol * (float)snareVoice.FaderVolumeFilter.b;
+	case 4:		return cymbalVoice.vol * (float)cymbalVoice.FaderVolumeFilter.b;
+	default:	return hatVoice.vol * (float)hatVoice.FaderVolumeFilter.b;
+	}
+}
+
+//-----------------------------------------------------------------------
+// vol is the channel volume of the voice (> 0), see voiceFx_process
+static void voiceFx_compressor(VoiceFxState* s, int16_t* buf, const uint8_t size, const float vol)
 {
 	const float thr = -40.f * s->amt * (1.f / 6.0206f);	// threshold in log2 units (6.02 dB each)
 	const float slope = 1.f - 1.f / (1.f + 9.f * s->amt);	// 1 - 1/ratio
 	const float makeup = -0.75f * thr * slope;			// most of the gain lost at full scale
 	const float atk = 1.f - expf(-FX_INV_FS / (0.0001f * powf(50.f, s->par)));
 	const float rel = 1.f - expf(-FX_INV_FS / (0.03f * powf(20.f, s->par)));
+	const float pre = 1.f / vol;
 	float env = s->env;
 	for(uint8_t i = 0; i < size; i++)
 	{
 		const float x = buf[i] * (1.f / 32768.f);
-		const float ax = fabsf(x);
+		const float ax = fabsf(x) * pre;
 		env += ((ax > env) ? atk : rel) * (ax - env);
 		const float over = fastLog2(env + 1e-6f) - thr;
 		const float g = (over > 0.f) ? makeup - over * slope : makeup;
-		buf[i] = toInt16(kneeLimit(x * fastExp2(g)));
+		buf[i] = toInt16(vol * kneeLimit(pre * x * fastExp2(g)));
 	}
 	s->env = env;
 }
 
 //-----------------------------------------------------------------------
-static void voiceFx_distortion(VoiceFxState* s, int16_t* buf, const uint8_t size)
+static void voiceFx_distortion(VoiceFxState* s, int16_t* buf, const uint8_t size, const float vol)
 {
 	const float a = s->amt;
 	const float drive = 1.f + 15.f * a * a;
+	const float in = 1.f / (vol * 32768.f);
 	// the distorted wave is near full scale: about the loudness of the dry hit
-	const float out = powf(drive, -0.35f);
+	const float out = vol * powf(drive, -0.35f);
 	// tone: 1 kHz at 0, open from about 80 %
 	const float fc = 1000.f * powf(64.f, s->par);
 	const float lpC = (fc < 0.4f * FX_FS) ? 1.f - expf(-2.f * PI_F * fc * FX_INV_FS) : 1.f;
@@ -187,7 +212,7 @@ static void voiceFx_distortion(VoiceFxState* s, int16_t* buf, const uint8_t size
 		float dx = s->dcX, dy = s->dcY;
 		for(uint8_t i = 0; i < size; i++)
 		{
-			const float y = (softSat(drive * buf[i] * (1.f / 32768.f) + bias) - sb) * norm;
+			const float y = (softSat(drive * buf[i] * in + bias) - sb) * norm;
 			const float hp = y - dx + dcR * dy;
 			dx = y;
 			dy = hp;
@@ -202,7 +227,7 @@ static void voiceFx_distortion(VoiceFxState* s, int16_t* buf, const uint8_t size
 		for(uint8_t i = 0; i < size; i++)
 		{
 			// sin(pi/2 * x * drive): saturates up to full scale, folds beyond
-			float q = 0.25f * drive * buf[i] * (1.f / 32768.f);
+			float q = 0.25f * drive * buf[i] * in;
 			q -= floorf(q);
 			lp += lpC * (sinCycle(q) - lp);
 			buf[i] = toInt16(out * lp);
@@ -212,7 +237,7 @@ static void voiceFx_distortion(VoiceFxState* s, int16_t* buf, const uint8_t size
 	default:	// VFX_CLIP
 		for(uint8_t i = 0; i < size; i++)
 		{
-			lp += lpC * (clamp1(drive * buf[i] * (1.f / 32768.f)) - lp);
+			lp += lpC * (clamp1(drive * buf[i] * in) - lp);
 			buf[i] = toInt16(out * lp);
 		}
 		break;
@@ -254,15 +279,16 @@ void voiceFx_process(uint8_t voice, int16_t* buf, uint8_t size, int16_t* fxBus, 
 {
 	if(voice > 5) return;
 	VoiceFxState* s = &voiceFx[voice];
-	switch(s->type)
+	const float vol = voiceFx_channelVolume(voice);
+	switch((vol > 0.001f) ? s->type : VFX_OFF)	// a silent voice: nothing to do
 	{
 	case VFX_COMPRESSOR:
-		voiceFx_compressor(s, buf, size);
+		voiceFx_compressor(s, buf, size, vol);
 		break;
 	case VFX_TUBE:
 	case VFX_FOLD:
 	case VFX_CLIP:
-		voiceFx_distortion(s, buf, size);
+		voiceFx_distortion(s, buf, size, vol);
 		break;
 	case VFX_RING:
 		voiceFx_ring(s, buf, size);
